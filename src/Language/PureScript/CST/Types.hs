@@ -238,7 +238,7 @@ data ValueBinding a = ValueBinding
 
 data Guarded a
   = Unconditional SourceToken (Expression a)
-  | Guarded [(SourceToken, Separated (PatternGuard a), SourceToken, Expression a)]
+  | Guarded [GuardedExpression a]
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data GuardedExpression a = GuardedExpression
