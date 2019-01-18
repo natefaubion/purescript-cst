@@ -42,9 +42,7 @@ data Token
   | TokRightSquare
   | TokLeftArrow SourceStyle
   | TokRightArrow SourceStyle
-  | TokLeftFatArrow SourceStyle
   | TokRightFatArrow SourceStyle
-  | TokColon
   | TokDoubleColon SourceStyle
   | TokEquals
   | TokPipe
@@ -52,21 +50,25 @@ data Token
   | TokDot
   | TokComma
   | TokUnderscore
-  | TokLowerName Text
-  | TokUpperName Text
-  | TokSymbol Text
+  | TokLowerName [Text] Text
+  | TokUpperName [Text] Text
+  | TokSymbol [Text] Text
   | TokHole Text
   | TokChar Text Char
   | TokString Text Text
   | TokRawString Text
   | TokInt Text Integer
   | TokNumber Text Double
+  | TokLayoutStart
+  | TokLayoutSep
+  | TokLayoutEnd
   deriving (Show, Eq, Ord, Generic)
 
 type SourceToken = (TokenAnn, Token)
 
 data Ident = Ident
   { identTok :: SourceToken
+  , identQual :: [Text]
   , identName :: Text
   } deriving (Show, Eq, Ord, Generic)
 
@@ -97,9 +99,8 @@ data OneOrDelimited a
 
 data Kind a
   = KindName a Ident
-  | KindApp a (Kind a) (Kind a)
   | KindArr a (Kind a) SourceToken (Kind a)
-  | KindRow a (Kind a)
+  | KindRow a SourceToken (Kind a)
   | KindParens a (Wrapped (Kind a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
@@ -109,33 +110,31 @@ data Type a
   | TypeWildcard a SourceToken
   | TypeHole a Ident
   | TypeString a SourceToken Text
-  | TypeRawString a SourceToken Text
-  | TypeRow a (Delimited (Labeled (Type a)))
-  | TypeForall a SourceToken [TypeVarBinding a] SourceToken
+  | TypeRow a (Wrapped (Row a))
+  | TypeRecord a (Wrapped (Row a))
+  | TypeForall a SourceToken [TypeVarBinding a] SourceToken (Type a)
+  | TypeKinded a (Type a) SourceToken (Kind a)
   | TypeApp a (Type a) (Type a)
-  | TypeBinaryOp a (Type a) Ident (Type a)
+  | TypeOp a (Type a) Ident (Type a)
+  | TypeArr a (Type a) SourceToken (Type a)
   | TypeConstrained a (Type a) SourceToken (Type a)
   | TypeParens a (Wrapped (Type a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data TypeVarBinding a = TypeVarBinding
-  { tyVarName :: Ident
-  , tyVarKind :: Maybe (SourceToken, Kind a)
+data TypeVarBinding a
+  = TypeVarKinded (Wrapped (Labeled (Kind a)))
+  | TypeVarName Ident
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
+
+data Row a = Row
+  { rowLabels :: Maybe (Separated (Labeled (Type a)))
+  , rowTail :: Maybe (SourceToken, Type a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
-
-newtype ModuleNamespace = ModuleNamespace
-  { modName :: Separated Ident
-  } deriving (Show, Eq, Ord, Generic)
-
-data Qualification = Qualification
-  { qualModule :: ModuleNamespace
-  , qualDot :: SourceToken
-  } deriving (Show, Eq, Ord, Generic)
 
 data ModuleDecl a = ModuleDecl
   { modAnn :: a
   , modKeyword :: SourceToken
-  , modNamespace :: ModuleNamespace
+  , modNamespace :: Ident
   , modExports :: (DelimitedNonEmpty (Export a))
   , modWhere :: SourceToken
   , modImports :: [ImportFields a]
@@ -149,7 +148,7 @@ data Export a
   | ExportTypeOp a SourceToken (Wrapped Ident)
   | ExportClass a SourceToken Ident
   | ExportKind a SourceToken Ident
-  | ExportModule a ModuleNamespace
+  | ExportModule a SourceToken Ident
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data DataMembers a
@@ -170,9 +169,9 @@ data Declaration a
 data ImportFields a = ImportFields
   { impAnn :: a
   , impKeyword :: SourceToken
-  , impModule :: ModuleNamespace
-  , impNames :: (Maybe (Delimited (Import a)))
-  , impQualification :: (Maybe (SourceToken, ModuleNamespace))
+  , impModule :: Ident
+  , impNames :: Maybe (Delimited (Import a))
+  , impQualification :: Maybe (SourceToken, Ident)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Import a
@@ -237,20 +236,20 @@ data ValueBinding a = ValueBinding
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Guarded a
-  = Unconditional SourceToken (Expression a)
-  | Guarded [GuardedExpression a]
+  = Unconditional SourceToken (Expr a)
+  | Guarded [GuardedExpr a]
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data GuardedExpression a = GuardedExpression
+data GuardedExpr a = GuardedExpr
   { grdBar :: SourceToken
   , grdPatterns :: Separated (PatternGuard a)
   , grdSep :: SourceToken
-  , grdExpr :: Expression a
+  , grdExpr :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data PatternGuard a = Guard
   { patBinder :: Maybe (Binder a, SourceToken)
-  , patExpr :: Expression a
+  , patExpr :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Foreign a
@@ -259,25 +258,23 @@ data Foreign a
   | ForeignKind SourceToken Ident
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data Expression a
+data Expr a
   = ExprHole a Ident
   | ExprSection a SourceToken
-  | ExprVar a (Maybe Qualification) Ident
-  | ExprConstructor a (Maybe Qualification) Ident
+  | ExprVar a Ident
+  | ExprConstructor a Ident
   | ExprChar a SourceToken Char
   | ExprString a SourceToken Text
-  | ExprRawString a SourceToken Text
-  | ExprInt a SourceToken Integer
-  | ExprNumber a SourceToken Double
-  | ExprArray a (Delimited (Expression a))
-  | ExprRecord a (Delimited (RecordLabeled (Expression a)))
-  | ExprParens a (Wrapped (Expression a))
-  | ExprTyped a (Expression a) SourceToken (Type a)
-  | ExprOp a (Expression a) Ident (Expression a)
-  | ExprUnaryMinus a SourceToken (Expression a)
+  | ExprNumber a SourceToken (Either Integer Double)
+  | ExprArray a (Delimited (Expr a))
+  | ExprRecord a (Delimited (RecordLabeled (Expr a)))
+  | ExprParens a (Wrapped (Expr a))
+  | ExprTyped a (Expr a) SourceToken (Type a)
+  | ExprOp a (Expr a) Ident (Expr a)
+  | ExprUnaryMinus a SourceToken (Expr a)
   | ExprRecordAccessor a (RecordAccessor a)
-  | ExprRecordUpdate a (Expression a) (DelimitedNonEmpty (RecordUpdate a))
-  | ExprApp a (Expression a) (Expression a)
+  | ExprRecordUpdate a (Expr a) (DelimitedNonEmpty (RecordUpdate a))
+  | ExprApp a (Expr a) (Expr a)
   | ExprInfix a (Infix a)
   | ExprLambda a (Lambda a)
   | ExprIf a (IfThenElse a)
@@ -294,43 +291,43 @@ data RecordLabeled a
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data RecordUpdate a
-  = RecordUpdateLeaf Ident SourceToken (Expression a)
+  = RecordUpdateLeaf Ident SourceToken (Expr a)
   | RecordUpdateBranch Ident (DelimitedNonEmpty (RecordUpdate a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data RecordAccessor a = RecordAccessor
-  { recExpr :: Expression a
+  { recExpr :: Expr a
   , recDot :: SourceToken
   , recField :: Ident
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Infix a = Infix
-  { ifxLhs :: Expression a
+  { ifxLhs :: Expr a
   , ifxOpen :: SourceToken
-  , ifxExpr :: Expression a
+  , ifxExpr :: Expr a
   , ifxClose :: SourceToken
-  , ifxRhs :: Expression a
+  , ifxRhs :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Lambda a = Lambda
   { lmbSymbol :: SourceToken
   , lmbBinders :: [Binder a]
   , lmbArr :: SourceToken
-  , lmbBody :: Expression a
+  , lmbBody :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data IfThenElse a = IfThenElse
   { iteIf :: SourceToken
-  , iteHead :: Expression a
+  , iteHead :: Expr a
   , iteThen :: SourceToken
-  , iteTrue :: Expression a
+  , iteTrue :: Expr a
   , iteElse :: SourceToken
-  , iteFalse :: Expression a
+  , iteFalse :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data CaseOf a = CaseOf
   { caseKeyword :: SourceToken
-  , caseHead :: Separated (Expression a)
+  , caseHead :: Separated (Expr a)
   , caseOf :: SourceToken
   , caseBranches :: [(Separated (Binder a), Guarded a)]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -339,33 +336,31 @@ data LetIn a = LetIn
   { letKeyword :: SourceToken
   , letBindings :: [DeclValueFields a]
   , letIn :: SourceToken
-  , letBody :: Expression a
+  , letBody :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Where a = Where
-  { whereBody :: Expression a
+  { whereBody :: Expr a
   , whereKeyword :: SourceToken
   , whereBindings :: [DeclValueFields a]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data DoBlock a = DoBlock
-  { doQual :: Maybe Qualification
-  , doKeyword :: SourceToken
+  { doKeyword :: SourceToken
   , doStatements :: [DoStatement a]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data DoStatement a
   = DoLet [DeclValueFields a]
-  | DoDiscard (Expression a)
-  | DoBind (Binder a) SourceToken (Expression a)
+  | DoDiscard (Expr a)
+  | DoBind (Binder a) SourceToken (Expr a)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data AdoBlock a = AdoBlock
-  { adoQual :: Maybe Qualification
-  , adoKeyword :: SourceToken
+  { adoKeyword :: SourceToken
   , adoStatements :: [DoStatement a]
   , adoIn :: SourceToken
-  , adoResult :: Expression a
+  , adoResult :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Binder a
@@ -375,7 +370,6 @@ data Binder a
   | BinderConstructor a Ident [Binder a]
   | BinderChar a SourceToken Char
   | BinderString a SourceToken Text
-  | BinderRawString a SourceToken Text
   | BinderInt a SourceToken Integer
   | BinderNumber a SourceToken Double
   | BinderArray a (Delimited (Binder a))

@@ -92,27 +92,36 @@ token = P.choice
       , TokLeftArrow     Unicode <$ P.char '←'
       , TokRightArrow    ASCII   <$ P.string "->"
       , TokRightArrow    Unicode <$ P.char '→'
-      , TokLeftFatArrow  ASCII   <$ P.string "<="
-      , TokLeftFatArrow  Unicode <$ P.char '⇐'
       , TokRightFatArrow ASCII   <$ P.string "=>"
       , TokRightFatArrow Unicode <$ P.char '⇒'
       , TokEquals                <$ P.char '='
-      , TokColon                 <$ P.char ':'
       , TokPipe                  <$ P.char '|'
       , TokDot                   <$ P.char '.'
       ] <* P.notFollowedBy symbolChar
 
   , P.try $ TokUnderscore <$ (P.char '_' <* P.notFollowedBy identLetter)
   , P.label "hole" $ P.try $ TokHole <$> (P.char '?' *> lname)
-  , P.label "proper identifier" $ TokUpperName <$> uname
-  , P.label "identifier" $ TokLowerName <$> lname
-  , P.label "symbol" $ TokSymbol <$> symbol
+  , P.label "identifier" identifier
   , P.label "character" $ uncurry TokChar <$> charLiteral
   , P.label "raw string" $ TokRawString <$> rawStringLiteral
   , P.label "string" $ uncurry TokString <$> stringLiteral
   , P.label "integer" $ uncurry TokInt <$> intLiteral
   , P.label "number" $ uncurry TokNumber <$> numberLiteral
   ]
+
+identifier :: Lexer e m => m Token
+identifier = go []
+  where
+  go accum =
+    (do
+      ident <- P.try uname
+      (P.char '.' *> go (ident : accum))
+        <|> pure (TokUpperName (reverse accum) ident))
+    <|> go1 (reverse accum)
+
+  go1 qual =
+    TokLowerName qual <$> lname
+      <|> TokSymbol qual <$> symbol
 
 lname :: Lexer e m => m Text
 lname = Text.cons <$> identStart <*> (Text.pack <$> P.many identLetter)
@@ -189,11 +198,8 @@ tokenDelta = \case
   TokLeftArrow Unicode     -> (0, 1)
   TokRightArrow ASCII      -> (0, 2)
   TokRightArrow Unicode    -> (0, 1)
-  TokLeftFatArrow ASCII    -> (0, 2)
-  TokLeftFatArrow Unicode  -> (0, 1)
   TokRightFatArrow ASCII   -> (0, 2)
   TokRightFatArrow Unicode -> (0, 1)
-  TokColon                 -> (0, 1)
   TokDoubleColon ASCII     -> (0, 2)
   TokDoubleColon Unicode   -> (0, 1)
   TokEquals                -> (0, 1)
@@ -202,15 +208,21 @@ tokenDelta = \case
   TokDot                   -> (0, 1)
   TokComma                 -> (0, 1)
   TokUnderscore            -> (0, 1)
-  TokLowerName name        -> (0, Text.length name)
-  TokUpperName name        -> (0, Text.length name)
-  TokSymbol sym            -> (0, Text.length sym)
+  TokLowerName qual name   -> (0, qualDelta qual + Text.length name)
+  TokUpperName qual name   -> (0, qualDelta qual + Text.length name)
+  TokSymbol qual sym       -> (0, qualDelta qual + Text.length sym)
   TokHole hole             -> (0, Text.length hole + 1)
   TokChar raw _            -> (0, Text.length raw + 2)
   TokInt raw _             -> (0, Text.length raw)
   TokNumber raw _          -> (0, Text.length raw)
   TokString raw _          -> multiLine 1 $ textDelta raw
   TokRawString raw         -> multiLine 3 $ textDelta raw
+  TokLayoutStart           -> (0, 0)
+  TokLayoutSep             -> (0, 0)
+  TokLayoutEnd             -> (0, 0)
+
+qualDelta :: [Text] -> Int
+qualDelta = foldr ((+) . (+ 1) . Text.length) 0
 
 multiLine :: Int -> (Int, Int) -> (Int, Int)
 multiLine n (0, c) = (0, c + n + n)
@@ -268,11 +280,8 @@ printToken = \case
   TokLeftArrow Unicode     -> "←"
   TokRightArrow ASCII      -> "->"
   TokRightArrow Unicode    -> "→"
-  TokLeftFatArrow ASCII    -> "<="
-  TokLeftFatArrow Unicode  -> "⇐"
   TokRightFatArrow ASCII   -> "=>"
   TokRightFatArrow Unicode -> "⇒"
-  TokColon                 -> ":"
   TokDoubleColon ASCII     -> "::"
   TokDoubleColon Unicode   -> "∷"
   TokEquals                -> "="
@@ -281,15 +290,21 @@ printToken = \case
   TokDot                   -> "."
   TokComma                 -> ","
   TokUnderscore            -> "_"
-  TokLowerName name        -> name
-  TokUpperName name        -> name
-  TokSymbol sym            -> sym
+  TokLowerName qual name   -> printQual qual <> name
+  TokUpperName qual name   -> printQual qual <> name
+  TokSymbol qual sym       -> printQual qual <> sym
   TokHole hole             -> "?" <> hole
   TokChar raw _            -> "'" <> raw <> "'"
   TokString raw _          -> "\"" <> raw <> "\""
   TokRawString raw         -> "\"\"\"" <> raw <> "\"\"\""
   TokInt raw _             -> raw
   TokNumber raw _          -> raw
+  TokLayoutStart           -> ""
+  TokLayoutSep             -> ""
+  TokLayoutEnd             -> ""
+
+printQual :: [Text] -> Text
+printQual = Text.concat . map (<> ".")
 
 printTokens :: LexerResult -> Text
 printTokens (toks, trailingComments) =

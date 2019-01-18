@@ -76,6 +76,8 @@ dependencies:
 - dlist
 - deepseq
 - criterion
+- containers
+- array
 
 library:
   source-dirs: src
