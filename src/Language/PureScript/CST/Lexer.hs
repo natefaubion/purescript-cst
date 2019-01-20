@@ -4,12 +4,13 @@ import Prelude
 
 import Control.Applicative ((<|>))
 import Data.Char (isAscii, isSymbol)
+import Data.DList (DList, snoc)
 import qualified Data.DList as DList
 import Data.Foldable (foldl')
 import Data.Text (Text)
-import Data.Void (Void)
+import Data.Void (Void, absurd)
 import qualified Data.Text as Text
-import Language.PureScript.CST.Types (Token(..), TokenAnn(..), Comment(..), LineFeed(..), SourcePos(..), SourceStyle(..))
+import Language.PureScript.CST.Types (Token(..), TokenAnn(..), Comment(..), LineFeed(..), SourcePos(..), SourceRange(..), SourceStyle(..), SourceToken)
 import Text.Megaparsec (MonadParsec)
 import qualified Text.Megaparsec as P
 import qualified Text.Megaparsec.Char as P
@@ -17,7 +18,160 @@ import qualified Text.Megaparsec.Char.Lexer as P
 
 type Lexer e m = MonadParsec e Text m
 
-type LexerResult = ([(TokenAnn, Token)], [Comment LineFeed])
+type LexerResult = ([SourceToken], [Comment LineFeed])
+
+data LexerState = LexerState
+  { lexAcc :: DList SourceToken
+  , lexLeading :: [Comment LineFeed]
+  , lexTok :: Token
+  , lexPos :: SourcePos
+  , lexStack :: LayoutStack
+  }
+
+data LayoutDelim
+  = LayoutParen
+  | LayoutBrace
+  | LayoutSquare
+  | LayoutIndent
+  deriving (Show, Eq)
+
+type LayoutStack = [(Int, LayoutDelim)]
+
+layoutToken :: SourcePos -> Token -> SourceToken
+layoutToken pos = (ann,)
+  where
+  ann = TokenAnn
+    { tokRange = SourceRange pos pos
+    , tokLeadingComments = []
+    , tokTrailingComments = []
+    }
+
+hasLayout :: Token -> Maybe LayoutDelim
+hasLayout = \case
+  TokLeftParen -> Just LayoutParen
+  TokLeftBrace -> Just LayoutBrace
+  TokLeftSquare -> Just LayoutSquare
+  TokLowerName [] "let" -> Just LayoutIndent
+  TokLowerName [] "where" -> Just LayoutIndent
+  TokLowerName [] "do" -> Just LayoutIndent
+  TokLowerName [] "of" -> Just LayoutIndent
+  _ -> Nothing
+
+closesLayout :: Token -> Maybe LayoutDelim
+closesLayout = \case
+  TokRightParen -> Just LayoutParen
+  TokRightBrace -> Just LayoutBrace
+  TokLeftSquare -> Just LayoutSquare
+  TokLowerName [] "in" -> Just LayoutIndent
+  _ -> Nothing
+
+tokens :: forall e m. Lexer e m => m LexerResult
+tokens = do
+  leading <- uncurry (<>) <$> breakComments
+  mbTok <- P.optional token
+  case mbTok of
+    Nothing -> pure (mempty, leading)
+    Just tok ->
+      loop False $ LexerState
+        { lexAcc = mempty
+        , lexLeading = leading
+        , lexTok = tok
+        , lexPos = advanceLeading (SourcePos 1 1) leading
+        , lexStack = [(0, LayoutIndent)]
+        }
+  where
+  loop :: Bool -> LexerState -> m LexerResult
+  loop lytStarted (LexerState {..}) = do
+    (trailing, leading) <- breakComments
+    let
+      (endPos, lexPos') =
+        ( advanceToken lexPos lexTok
+        , advanceLeading (advanceTrailing endPos trailing) leading
+        )
+
+      tokAnn = TokenAnn
+        { tokRange = SourceRange lexPos endPos
+        , tokLeadingComments = lexLeading
+        , tokTrailingComments = trailing
+        }
+
+      mbLytStart = hasLayout lexTok
+      tokCol = srcColumn lexPos
+
+      k0 :: m LexerResult
+      k0 = case (head lexStack, closesLayout lexTok) of
+        ((indCol, LayoutIndent), Nothing)
+          | tokCol < indCol ->
+              uncurry k1 $ collapse lexPos lexStack lexAcc
+          | Just LayoutIndent <- mbLytStart, tokCol == indCol ->
+              k1 (tail lexStack) $ lexAcc `snoc` layoutToken lexPos TokLayoutEnd
+          | tokCol == indCol && not lytStarted ->
+              k1 lexStack $ lexAcc `snoc` layoutToken lexPos TokLayoutSep
+        ((indCol, LayoutIndent), Just LayoutIndent)
+          | indCol > 0 ->
+              k1 (tail lexStack) $ lexAcc `snoc` layoutToken lexPos TokLayoutEnd
+          | otherwise ->
+              k1 lexStack lexAcc
+        ((0, delim), Just delim') | delim' == delim ->
+          k1 (tail lexStack) $ lexAcc
+        (_, Nothing) ->
+          k1 lexStack lexAcc
+        _ -> fail $ "Mismatched delimiters or indentation"
+
+      k1 :: LayoutStack -> DList SourceToken -> m LexerResult
+      k1 lexStack' lexAcc' =
+        k2 lexStack' $ lexAcc' `snoc` (tokAnn, lexTok)
+
+      k2 :: LayoutStack -> DList SourceToken -> m LexerResult
+      k2 lexStack' lexAcc' = case mbLytStart of
+        Just LayoutIndent ->
+          k3 ((srcColumn lexPos', LayoutIndent) : lexStack') $
+            lexAcc' `snoc` layoutToken lexPos' TokLayoutStart
+        Just delim ->
+          k3 ((0, delim) : lexStack') lexAcc'
+        Nothing ->
+          k3 lexStack' lexAcc'
+
+      k3 :: LayoutStack -> DList SourceToken -> m LexerResult
+      k3 lexStack' lexAcc' = P.optional token >>= \case
+        Nothing -> do
+          let result = DList.toList $ unwind lexPos' lexStack' lexAcc'
+          pure (result, leading)
+        Just lexTok' ->
+          loop (mbLytStart == Just LayoutIndent) $
+            LexerState lexAcc' leading lexTok' lexPos' lexStack'
+    k0
+
+  collapse
+    :: SourcePos
+    -> LayoutStack
+    -> DList SourceToken
+    -> (LayoutStack, DList SourceToken)
+  collapse tokPos@(SourcePos _ tokCol) = go
+    where
+    go ((indCol, LayoutIndent) : stack) acc
+      | tokCol < indCol = go stack $ acc `snoc` layoutToken tokPos TokLayoutEnd
+    go stack acc = (stack, acc)
+
+  unwind
+    :: SourcePos
+    -> LayoutStack
+    -> DList SourceToken
+    -> DList SourceToken
+  unwind tokPos = go
+    where
+    go ((indCol, LayoutIndent) : stack) acc
+      | indCol > 0 = go stack $ acc `snoc` layoutToken tokPos TokLayoutEnd
+    go _ acc = acc
+
+advanceToken :: SourcePos -> Token -> SourcePos
+advanceToken pos = applyDelta pos . tokenDelta
+
+advanceLeading :: SourcePos -> [Comment LineFeed] -> SourcePos
+advanceLeading pos = foldl' (\a -> applyDelta a . commentDelta lineDelta) pos
+
+advanceTrailing :: SourcePos -> [Comment Void] -> SourcePos
+advanceTrailing pos = foldl' (\a -> applyDelta a . commentDelta (const (0, 0))) pos
 
 space :: Lexer e m => m Int
 space = Text.length <$> P.takeWhile1P (Just "space") (== ' ')
@@ -42,37 +196,19 @@ trailingComment = P.choice
   ]
 
 breakComments :: Lexer e m => m ([Comment void], [Comment LineFeed])
-breakComments = go mempty
+breakComments = go (mempty :: DList (Comment Void))
   where
   go ts = do
     isLine <- True <$ P.lookAhead line <|> pure False
     if isLine
       then do
         ls <- P.many (Line <$> line <|> trailingComment)
-        pure (DList.toList ts, ls)
+        pure (fmap absurd <$> DList.toList ts, ls)
       else do
         mbT <- P.optional trailingComment
         case mbT of
-          Nothing -> pure (DList.toList ts, [])
-          Just t -> go (DList.snoc ts t)
-
-tokens :: Lexer e m => m LexerResult
-tokens = do
-  leading <- uncurry (<>) <$> breakComments
-  mbTok <- P.optional token
-  case mbTok of
-    Just tok -> go mempty tok leading
-    Nothing -> pure (mempty, leading)
-  where
-  go acc prevTok prevLeading = do
-    (trailing, leading) <- breakComments
-    let
-      prevAnn = TokenAnn prevLeading trailing
-      acc' = DList.snoc acc (prevAnn, prevTok)
-    mbTok <- P.optional token
-    case mbTok of
-      Just tok -> go acc' tok leading
-      Nothing -> pure (DList.toList acc', leading)
+          Nothing -> pure ([], fmap absurd <$> DList.toList ts)
+          Just t -> go (ts `snoc` t)
 
 token :: Lexer e m => m Token
 token = P.choice
@@ -249,25 +385,6 @@ applyDelta (SourcePos l c) = \case
   (0, n) -> SourcePos l (c + n)
   (k, d) -> SourcePos (l + k) d
 
-addSourcePos :: [(TokenAnn, Token)] -> [(SourcePos, TokenAnn, Token)]
-addSourcePos = flip addSourcePos' (SourcePos 1 1)
-
-addSourcePos' :: [(TokenAnn, Token)] -> SourcePos -> [(SourcePos, TokenAnn, Token)]
-addSourcePos' = foldr go (const [])
-  where
-  go (ann, tok) k pos = do
-    let
-      pos'   = goLeading pos (tokLeadingComments ann)
-      pos''  = applyDelta pos' (tokenDelta tok)
-      pos''' = goTrailing pos'' (tokTrailingComments ann)
-    (pos'', ann, tok) : k pos'''
-
-  goLeading = foldl' $ \a b ->
-    applyDelta a (commentDelta lineDelta b)
-
-  goTrailing = foldl' $ \a b ->
-    applyDelta a (commentDelta (const (0, 0)) b)
-
 printToken :: Token -> Text
 printToken = \case
   TokLeftParen             -> "("
@@ -311,7 +428,7 @@ printTokens (toks, trailingComments) =
   Text.concat (map pp toks)
     <> Text.concat (map ppTc trailingComments)
   where
-  pp (TokenAnn leading trailing, tok) =
+  pp (TokenAnn _ leading trailing, tok) =
     Text.concat (map ppLc leading)
       <> printToken tok
       <> Text.concat (map ppTc trailing)

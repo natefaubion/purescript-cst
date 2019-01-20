@@ -20,13 +20,14 @@ data Comment l
   = Comment !Text
   | Space Int
   | Line l
-  deriving (Show, Eq, Ord, Generic)
+  deriving (Show, Eq, Ord, Generic, Functor)
 
 data LineFeed = LF | CRLF
   deriving (Show, Eq, Ord, Generic)
 
 data TokenAnn = TokenAnn
-  { tokLeadingComments :: ![Comment LineFeed]
+  { tokRange :: SourceRange
+  , tokLeadingComments :: ![Comment LineFeed]
   , tokTrailingComments :: ![Comment Void]
   } deriving (Show, Eq, Ord, Generic)
 

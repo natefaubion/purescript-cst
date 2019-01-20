@@ -9,7 +9,10 @@ import qualified Data.Text as Text
 import Language.PureScript.CST.Types
 
 placeholder :: SourceToken
-placeholder = (TokenAnn [] [], TokLowerName [] "<placeholder>")
+placeholder =
+  ( TokenAnn (SourceRange (SourcePos 0 0) (SourcePos 0 0)) [] []
+  , TokLowerName [] "<placeholder>"
+  )
 
 separated :: [(SourceToken, a)] -> Separated a
 separated = go []

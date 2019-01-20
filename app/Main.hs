@@ -11,7 +11,7 @@ main :: IO ()
 main = do
   src <- IO.readFile "Test.purs"
   let
-    lex = fmap (\(a, _) -> CST.addSourcePos a) . CST.lex "Test.purs"
+    lex = fmap fst . CST.lex "Test.purs"
   defaultMain
     [ bench "old" $ whnf (PS.lex "Test.purs") src
     , bench "new" $ whnf lex src
