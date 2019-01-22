@@ -132,20 +132,20 @@ data Row a = Row
   , rowTail :: Maybe (SourceToken, Type a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data ModuleDecl a = ModuleDecl
+data Module a = Module
   { modAnn :: a
   , modKeyword :: SourceToken
   , modNamespace :: Ident
-  , modExports :: (DelimitedNonEmpty (Export a))
+  , modExports :: Maybe (DelimitedNonEmpty (Export a))
   , modWhere :: SourceToken
-  , modImports :: [ImportFields a]
+  , modImports :: [ImportDecl a]
   , modDecls :: [Declaration a]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Export a
   = ExportValue a Ident
   | ExportOp a (Wrapped Ident)
-  | ExportType a SourceToken (Maybe (Wrapped (Maybe (DataMembers a))))
+  | ExportType a Ident (Maybe (Wrapped (Maybe (DataMembers a))))
   | ExportTypeOp a SourceToken (Wrapped Ident)
   | ExportClass a SourceToken Ident
   | ExportKind a SourceToken Ident
@@ -153,39 +153,47 @@ data Export a
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data DataMembers a
-  = DataAll a SourceToken SourceToken
+  = DataAll a SourceToken
   | DataEnumerated a (Separated Ident)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Declaration a
-  = DeclData (DeclDataHead a) (Maybe (SourceToken, Separated (DeclDataCtor a)))
-  | DeclType (DeclDataHead a) SourceToken (Type a)
+  = DeclData a (DeclDataHead a) (Maybe (SourceToken, Separated (DeclDataCtor a)))
+  | DeclType a (DeclDataHead a) SourceToken (Type a)
+  | DeclNewtype a (DeclDataHead a) SourceToken Ident (Type a)
   | DeclClass a (DeclClassHead a) (Maybe (SourceToken, [Labeled (Type a)]))
-  | DeclInstance a (DeclInstanceHead a) (Maybe (SourceToken, [DeclValueFields a]))
-  | DeclValue a (DeclValueFields a)
+  | DeclInstance a (DeclInstanceHead a) (Maybe (SourceToken, [InstanceBinding a]))
+  | DeclDerive a SourceToken (Maybe SourceToken) (DeclInstanceHead a)
+  | DeclSignature a (Labeled (Type a))
+  | DeclValue a (ValueBindingFields a)
   | DeclFixity a (DeclFixityFields a)
   | DeclForeign a SourceToken SourceToken (Foreign a)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data ImportFields a = ImportFields
+data InstanceBinding a
+  = InstanceBindingSignature a (Labeled (Type a))
+  | InstanceBindingName a (ValueBindingFields a)
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
+
+data ImportDecl a = ImportDecl
   { impAnn :: a
   , impKeyword :: SourceToken
   , impModule :: Ident
-  , impNames :: Maybe (Delimited (Import a))
+  , impNames :: Maybe (DelimitedNonEmpty (Import a))
   , impQualification :: Maybe (SourceToken, Ident)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Import a
   = ImportValue a Ident
   | ImportOp a (Wrapped Ident)
-  | ImportType a SourceToken (Maybe (Wrapped (Maybe (DataMembers a))))
+  | ImportType a Ident (Maybe (Wrapped (Maybe (DataMembers a))))
   | ImportTypeOp a SourceToken (Wrapped Ident)
   | ImportClass a SourceToken Ident
   | ImportKind a SourceToken Ident
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data DeclDataHead a = DeclDataHead
-  { dataHdAnn :: a
+  { dataHdKeyword :: SourceToken
   , dataHdName :: Ident
   , dataHdVars :: [TypeVarBinding a]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -201,36 +209,34 @@ data DeclClassHead a = DeclClassHead
   , clsSuper :: Maybe (OneOrDelimited (Type a), SourceToken)
   , clsName :: Ident
   , clsVars :: [TypeVarBinding a]
-  , clsFundeps :: Maybe (SourceToken, Separated (DeclClassFundep a))
+  , clsFundeps :: Maybe (SourceToken, Separated DeclClassFundep)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data DeclClassFundep a = DeclClassFundep
+data DeclClassFundep = DeclClassFundep
   { fndLhs :: [Ident]
   , fndArr :: SourceToken
   , fndRhs :: [Ident]
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
+  } deriving (Show, Eq, Ord, Generic)
 
 data DeclInstanceHead a = DeclInstanceHead
   { instKeyword :: SourceToken
-  , instConstraints :: Maybe (OneOrDelimited (Type a), SourceToken)
   , instName :: Ident
+  , instSep :: SourceToken
+  , instConstraints :: Maybe (OneOrDelimited (Type a), SourceToken)
+  , instClass :: Ident
   , instTypes :: [Type a]
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
-
-data DeclValueFields a = DeclValueFields
-  { valSig :: Maybe (Labeled (Type a))
-  , valDef:: ValueBinding a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data DeclFixityFields a = DeclFixityFields
   { fxtKeyword :: SourceToken
   , fxtNum :: (SourceToken, Integer)
   , fxtType :: Maybe SourceToken
+  , fxtName :: Ident
   , fxtAs :: SourceToken
   , fxtSymbol :: Ident
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data ValueBinding a = ValueBinding
+data ValueBindingFields a = ValueBindingFields
   { valName :: Ident
   , valBinders :: [Binder a]
   , valGuarded :: Guarded a
@@ -248,7 +254,7 @@ data GuardedExpr a = GuardedExpr
   , grdExpr :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data PatternGuard a = Guard
+data PatternGuard a = PatternGuard
   { patBinder :: Maybe (Binder a, SourceToken)
   , patExpr :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -262,8 +268,9 @@ data Foreign a
 data Expr a
   = ExprHole a Ident
   | ExprSection a SourceToken
-  | ExprVar a Ident
+  | ExprIdent a Ident
   | ExprConstructor a Ident
+  | ExprBoolean a SourceToken Bool
   | ExprChar a SourceToken Char
   | ExprString a SourceToken Text
   | ExprNumber a SourceToken (Either Integer Double)
@@ -335,7 +342,7 @@ data CaseOf a = CaseOf
 
 data LetIn a = LetIn
   { letKeyword :: SourceToken
-  , letBindings :: [DeclValueFields a]
+  , letBindings :: [LetBinding a]
   , letIn :: SourceToken
   , letBody :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -343,8 +350,14 @@ data LetIn a = LetIn
 data Where a = Where
   { whereBody :: Expr a
   , whereKeyword :: SourceToken
-  , whereBindings :: [DeclValueFields a]
+  , whereBindings :: [LetBinding a]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
+
+data LetBinding a
+  = LetBindingSignature a (Labeled (Type a))
+  | LetBindingName a (ValueBindingFields a)
+  | LetBindingPattern a (Binder a) SourceToken (Expr a)
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data DoBlock a = DoBlock
   { doKeyword :: SourceToken
@@ -352,7 +365,7 @@ data DoBlock a = DoBlock
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data DoStatement a
-  = DoLet [DeclValueFields a]
+  = DoLet SourceToken [LetBinding a]
   | DoDiscard (Expr a)
   | DoBind (Binder a) SourceToken (Expr a)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -369,10 +382,10 @@ data Binder a
   | BinderVar a Ident
   | BinderNamed a Ident SourceToken (Binder a)
   | BinderConstructor a Ident [Binder a]
+  | BinderBoolean a SourceToken Bool
   | BinderChar a SourceToken Char
   | BinderString a SourceToken Text
-  | BinderInt a SourceToken Integer
-  | BinderNumber a SourceToken Double
+  | BinderNumber a SourceToken (Either Integer Double)
   | BinderArray a (Delimited (Binder a))
   | BinderRecord a (Delimited (RecordLabeled (Binder a)))
   | BinderParens a (Wrapped (Binder a))
