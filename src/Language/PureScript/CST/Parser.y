@@ -186,16 +186,14 @@ type1 :: { Type () }
 
 type2 :: { Type () }
   : typeAtom { $1 }
-  | typeAtom typeAtom { TypeApp () $1 $2 }
+  | type2 typeAtom { TypeApp () $1 $2 }
 
 typeAtom :: { Type ()}
   : '_' { TypeWildcard () $1 }
-  | IDENT { TypeVar () (toIdent $1) }
-  | PROPER { TypeConstructor () (toIdent $1) }
-  | QUAL_PROPER { TypeConstructor () (toIdent $1) }
-  | LIT_STRING { uncurry (TypeString ()) (toString $1) }
-  | LIT_RAW_STRING { uncurry (TypeString ()) (toString $1) }
-  | LIT_HOLE { TypeHole () (toIdent $1) }
+  | var { TypeVar () $1 }
+  | properIdent { TypeConstructor () $1 }
+  | string { uncurry (TypeString ()) $1 }
+  | hole { TypeHole () $1 }
   | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
   | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
   | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
@@ -203,9 +201,8 @@ typeAtom :: { Type ()}
 
 typeKindedAtom :: { Type () }
   : '_' { TypeWildcard () $1 }
-  | LIT_HOLE { TypeHole () (toIdent $1) }
-  | PROPER { TypeConstructor () (toIdent $1) }
-  | QUAL_PROPER { TypeConstructor () (toIdent $1) }
+  | properIdent { TypeConstructor () $1 }
+  | hole { TypeHole () $1 }
   | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
   | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
   | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
@@ -246,10 +243,15 @@ expr0 :: { Expr () }
   | 'lambda' many(binder) '->' expr { ExprLambda () (Lambda $1 $2 $3 $4) }
 
 expr1 :: { Expr () }
-  : exprAtom { $1 }
+  : expr2 { $1 }
+  | expr2 '{' sep(recordUpdate, ',') '}' { ExprRecordUpdate () $1 (Wrapped $2 $3 $4) }
   | expr1 symbol expr0 { ExprOp () $1 $2 $3}
   | expr1 '`' expr '`' expr0 { ExprInfix () (Infix $1 $2 $3 $4 $5) }
   | expr1 expr0 { ExprApp () $1 $2 }
+
+expr2 :: { Expr () }
+  : exprAtom { $1 }
+  | exprAtom '.' label { ExprRecordAccessor () (RecordAccessor $1 $2 $3) }
 
 exprAtom :: { Expr () }
   : '_' { ExprSection () $1 }
@@ -273,6 +275,10 @@ record(a) :: { Delimited (RecordLabeled _) }
 recordLabel(a) :: { RecordLabeled _ }
   : var { RecordPun $1 }
   | label ':' a { RecordField $1 $2 $3 }
+
+recordUpdate :: { RecordUpdate () }
+  : label '=' expr { RecordUpdateLeaf $1 $2 $3 }
+  | label '{' sep(recordUpdate, ',') '}' { RecordUpdateBranch $1 (Wrapped $2 $3 $4) }
 
 letBinding :: { LetBinding () }
   : var '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
@@ -329,7 +335,7 @@ doStatement :: { DoStatement () }
   | expr '<-' expr { DoBind (toBinder $1) $2 $3 }
 
 module :: { Module () }
-  : 'module' proper exports 'where' '\{' moduleDecls '\}'
+  : 'module' properIdent exports 'where' '\{' moduleDecls '\}'
       { uncurry (Module () $1 $2 $3 $4) $6 }
 
 moduleDecls :: { ([ImportDecl ()], [Declaration ()]) }
@@ -345,42 +351,42 @@ exports :: { Maybe (DelimitedNonEmpty (Export ())) }
   | '(' sep(export, ',') ')' { Just (Wrapped $1 $2 $3) }
 
 export :: { Export () }
-  : ident { ExportValue () $1 }
+  : var { ExportValue () $1 }
   | '(' symbol ')' { ExportOp () (Wrapped $1 $2 $3) }
-  | properIdent { ExportType () $1 Nothing }
-  | properIdent dataMembers { ExportType () $1 (Just $2) }
+  | proper { ExportType () $1 Nothing }
+  | proper dataMembers { ExportType () $1 (Just $2) }
   | 'type' '(' symbol ')' { ExportTypeOp () $1 (Wrapped $2 $3 $4) }
-  | 'class' properIdent { ExportClass () $1 $2 }
-  | 'kind' properIdent { ExportKind () $1 $2 }
-  | 'module' proper { ExportModule () $1 $2 }
+  | 'class' proper { ExportClass () $1 $2 }
+  | 'kind' proper { ExportKind () $1 $2 }
+  | 'module' properIdent { ExportModule () $1 $2 }
 
 dataMembers :: { Wrapped (Maybe (DataMembers ())) }
  : '(' ')' { Wrapped $1 Nothing $2 }
  | '(' '..' ')' { Wrapped $1 (Just (DataAll () $2)) $3 }
- | '(' sep(properIdent, ',') ')' { Wrapped $1 (Just (DataEnumerated () $2)) $3 }
+ | '(' sep(proper, ',') ')' { Wrapped $1 (Just (DataEnumerated () $2)) $3 }
 
 importDecl :: { ImportDecl () }
-  : 'import' proper imports { ImportDecl () $1 $2 $3 Nothing }
-  | 'import' proper imports 'as' proper { ImportDecl () $1 $2 $3 (Just ($4, $5)) }
+  : 'import' properIdent imports { ImportDecl () $1 $2 $3 Nothing }
+  | 'import' properIdent imports 'as' proper { ImportDecl () $1 $2 $3 (Just ($4, $5)) }
 
 imports :: { Maybe (DelimitedNonEmpty (Import ())) }
   : {- empty -} { Nothing }
   | '(' sep(import, ',') ')' { Just (Wrapped $1 $2 $3) }
 
 import :: { Import () }
-  : ident { ImportValue () $1 }
+  : var { ImportValue () $1 }
   | '(' symbol ')' { ImportOp () (Wrapped $1 $2 $3) }
-  | properIdent { ImportType () $1 Nothing }
-  | properIdent dataMembers { ImportType () $1 (Just $2) }
+  | proper { ImportType () $1 Nothing }
+  | proper dataMembers { ImportType () $1 (Just $2) }
   | 'type' '(' symbol ')' { ImportTypeOp () $1 (Wrapped $2 $3 $4) }
-  | 'class' properIdent { ImportClass () $1 $2 }
-  | 'kind' properIdent { ImportKind () $1 $2 }
+  | 'class' proper { ImportClass () $1 $2 }
+  | 'kind' proper { ImportKind () $1 $2 }
 
 decl :: { Declaration () }
   : dataHead { DeclData () $1 Nothing }
   | dataHead '=' sep(dataCtor, '|') { DeclData () $1 (Just ($2, $3)) }
   | typeHead '=' type { DeclType () $1 $2 $3 }
-  | newtypeHead '=' properIdent type { DeclNewtype () $1 $2 $3 $4 }
+  | newtypeHead '=' properIdent typeAtom { DeclNewtype () $1 $2 $3 $4 }
   | classHead { DeclClass () $1 Nothing }
   | classHead 'where' '\{' manySep(classMember, '\;') '\}' { DeclClass () $1 (Just ($2, $4)) }
   | instHead { DeclInstance () $1 Nothing }
