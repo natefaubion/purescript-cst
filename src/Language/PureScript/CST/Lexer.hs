@@ -61,7 +61,7 @@ closesLayout :: Token -> Maybe LayoutDelim
 closesLayout = \case
   TokRightParen -> Just LayoutParen
   TokRightBrace -> Just LayoutBrace
-  TokLeftSquare -> Just LayoutSquare
+  TokRightSquare -> Just LayoutSquare
   TokLowerName [] "in" -> Just LayoutIndent
   _ -> Nothing
 

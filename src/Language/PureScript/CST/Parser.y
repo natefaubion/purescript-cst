@@ -2,7 +2,7 @@
 module Language.PureScript.CST.Parser
   ( parseType
   , parseKind
-  -- , parseExpr
+  , parseExpr
   , parseModule
   ) where
 
@@ -16,7 +16,7 @@ import Language.PureScript.CST.Utils
 
 %name parseKind kind
 %name parseType type
--- %name parseExpr expr
+%name parseExpr expr
 %name parseModule module
 %tokentype { SourceToken }
 %errorhandlertype explist
@@ -44,8 +44,8 @@ import Language.PureScript.CST.Utils
   '.'             { (_, TokDot) }
   ','             { (_, TokComma) }
   '_'             { (_, TokUnderscore) }
-  '#'             { (_, TokSymbol [] "#") }
   '@'             { (_, TokSymbol [] "@") }
+  '#'             { (_, TokSymbol [] "#") }
   '..'            { (_, TokSymbol [] "..") }
   'lambda'        { (_, TokSymbol [] "\\") }
   'ado'           { (_, TokLowerName _ "ado") }
@@ -135,11 +135,42 @@ var :: { Ident }
 
 symbol :: { Ident }
   : SYMBOL { toSymbol $1 }
+  | '@' { toSymbol $1 }
+  | '#' { toSymbol $1 }
+  | '..' { toSymbol $1 }
 
 label :: { Ident }
   : IDENT { toLabel $1 }
   | LIT_STRING { toLabel $1 }
   | LIT_RAW_STRING { toLabel $1 }
+  | 'ado' { toLabel $1 }
+  | 'as' { toLabel $1 }
+  | 'case' { toLabel $1 }
+  | 'class' { toLabel $1 }
+  | 'data' { toLabel $1 }
+  | 'derive' { toLabel $1 }
+  | 'do' { toLabel $1 }
+  | 'else' { toLabel $1 }
+  | 'false' { toLabel $1 }
+  | 'forall' { toLabel $1 }
+  | 'forallu' { toLabel $1 }
+  | 'foreign' { toLabel $1 }
+  | 'import' { toLabel $1 }
+  | 'if' { toLabel $1 }
+  | 'in' { toLabel $1 }
+  | 'infix' { toLabel $1 }
+  | 'infixl' { toLabel $1 }
+  | 'infixr' { toLabel $1 }
+  | 'instance' { toLabel $1 }
+  | 'kind' { toLabel $1 }
+  | 'let' { toLabel $1 }
+  | 'module' { toLabel $1 }
+  | 'newtype' { toLabel $1 }
+  | 'of' { toLabel $1 }
+  | 'then' { toLabel $1 }
+  | 'true' { toLabel $1 }
+  | 'type' { toLabel $1 }
+  | 'where' { toLabel $1 }
 
 hole :: { Ident }
   : LIT_HOLE { toIdent $1 }
@@ -235,6 +266,12 @@ expr :: { Expr () }
 
 expr0 :: { Expr () }
   : expr1 { $1 }
+  | expr0 expr1 { ExprApp () $1 $2 }
+  | expr0 symbol expr1 { ExprOp () $1 $2 $3}
+  | expr0 '`' expr '`' expr1 { ExprInfix () (Infix $1 $2 $3 $4 $5) }
+
+expr1 :: { Expr () }
+  : expr2 { $1 }
   | 'if' expr 'then' expr 'else' expr { ExprIf () (IfThenElse $1 $2 $3 $4 $5 $6) }
   | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
   | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
@@ -242,16 +279,10 @@ expr0 :: { Expr () }
   | 'ado' '\{' manySep(doStatement, '\;') '\}' 'in' expr { ExprAdo () (AdoBlock $1 $3 $5 $6) }
   | 'lambda' many(binder) '->' expr { ExprLambda () (Lambda $1 $2 $3 $4) }
 
-expr1 :: { Expr () }
-  : expr2 { $1 }
-  | expr2 '{' sep(recordUpdate, ',') '}' { ExprRecordUpdate () $1 (Wrapped $2 $3 $4) }
-  | expr1 symbol expr0 { ExprOp () $1 $2 $3}
-  | expr1 '`' expr '`' expr0 { ExprInfix () (Infix $1 $2 $3 $4 $5) }
-  | expr1 expr0 { ExprApp () $1 $2 }
-
 expr2 :: { Expr () }
   : exprAtom { $1 }
   | exprAtom '.' label { ExprRecordAccessor () (RecordAccessor $1 $2 $3) }
+  | exprAtom '{' sep(recordUpdate, ',') '}' { ExprRecordUpdate () $1 (Wrapped $2 $3 $4) }
 
 exprAtom :: { Expr () }
   : '_' { ExprSection () $1 }
@@ -287,7 +318,7 @@ letBinding :: { LetBinding () }
 
 binder
   : binder0 { $1 }
-  | binder symbol binder0 { BinderOp () $1 $2 $3 } -- TODO conflict with @
+  | binder symbol binder0 { BinderOp () $1 $2 $3 }
 
 binder0
   : binderAtom { $1 }

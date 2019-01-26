@@ -85,36 +85,45 @@ toBoolean tok = case tok of
   (_, TokLowerName [] "false") -> (tok, False)
   _                            -> internalError $ "Invalid boolean literal: " <> show tok
 
-toBinder :: Monoid a => Expr a -> Binder a
-toBinder = \case
-  ExprTyped a expr tok ty -> BinderTyped a (toBinder expr) tok ty
-  other -> toBinder0 other
-
-toBinder0 :: Monoid a => Expr a -> Binder a
-toBinder0 = \case
-  ExprOp a lhs op rhs | Ident _ [] name <- op, name /= "@" ->
-    BinderOp a (toBinder lhs) op (toBinder rhs)
-  expr@(ExprApp _ _ _) -> goApp mempty [] expr
-  other -> toBinderAtom other
+toBinder :: forall a. Show a => Monoid a => Expr a -> Binder a
+toBinder = convert []
   where
-  goApp ann args (ExprApp a next rhs) = goApp (a <> ann) (toBinder rhs : args) next
-  goApp ann args (ExprConstructor a ident) = BinderConstructor (a <> ann) ident args
-  goApp _ _ _ = internalError $ "Unexpected expression in binder position"
+  convert acc = \case
+    ExprSection a tok -> done (BinderWildcard a tok : acc)
+    ExprIdent a ident@(Ident _ [] _) -> done (BinderVar a ident : acc)
+    ExprConstructor a ident -> done (BinderConstructor a ident [] : acc)
+    ExprBoolean a tok val -> done (BinderBoolean a tok val : acc)
+    ExprChar a tok val -> done (BinderChar a tok val : acc)
+    ExprString a tok val -> done (BinderString a tok val : acc)
+    ExprNumber a tok val -> done (BinderNumber a tok val : acc)
+    ExprArray a del -> done (BinderArray a (fmap (fmap toBinder) <$> del) : acc)
+    ExprRecord a del -> done (BinderRecord a (fmap (fmap (fmap toBinder)) <$> del) : acc)
+    ExprParens a wrap -> done (BinderParens a (toBinder <$> wrap) : acc)
+    ExprTyped a expr tok ty -> done (BinderTyped a (toBinder expr) tok ty : acc)
+    ExprOp a lhs (Ident op [] "@") rhs ->
+      case splitNamed lhs of
+        (lhs', ExprIdent a' ident@(Ident _ [] _)) -> do
+          let acc' = BinderNamed (a <> a') ident op (toBinder rhs) : acc
+          maybe (done acc') (convert acc') lhs'
+        _ -> internalError "Unexpected expression in binder 1"
+    ExprOp a lhs op rhs -> done (BinderOp a (toBinder lhs) op (toBinder rhs) : acc)
+    ExprApp _ lhs rhs -> convert (toBinder rhs : acc) lhs
+    _ -> internalError "Unexpected expression in binder 2"
 
-toBinderAtom :: Monoid a => Expr a -> Binder a
-toBinderAtom = \case
-  -- TODO: Nested named patterns `a@b@c`
-  ExprOp a1 (ExprIdent a2 name@(Ident _ [] _)) (Ident op [] "@") rhs ->
-    BinderNamed (a1 <> a2) name op (toBinderAtom rhs)
-  ExprSection a tok -> BinderWildcard a tok
-  ExprIdent a ident@(Ident _ [] _) -> BinderVar a ident
-  ExprChar a tok ch -> BinderChar a tok ch
-  ExprString a tok str -> BinderString a tok str
-  ExprNumber a tok num -> BinderNumber a tok num
-  ExprArray a delim -> BinderArray a (fmap (fmap toBinder) <$> delim)
-  ExprRecord a delim -> BinderRecord a (fmap (fmap (fmap toBinder)) <$> delim)
-  ExprParens a wrap -> BinderParens a (toBinder <$> wrap)
-  _ -> internalError $ "Unexpected expression in binder position"
+  splitNamed :: Expr a -> (Maybe (Expr a), Expr a)
+  splitNamed = \case
+    ExprOp a lhs op@(Ident _ [] "@") (ExprApp a' lhs' rhs) ->
+      (Just (ExprOp (a <> a') lhs op lhs'), rhs)
+    ExprApp _ lhs rhs ->
+      (Just lhs, rhs)
+    expr ->
+      (Nothing, expr)
+
+  done :: [Binder a] -> Binder a
+  done = \case
+      BinderConstructor a ident [] : args -> BinderConstructor a ident args
+      [a] -> a
+      _ -> internalError $  "Unexpected expression in binder 3"
 
 toModuleDecls :: [Either (ImportDecl a) (Declaration a)] -> ([ImportDecl a], [Declaration a])
 toModuleDecls = goLeft []
