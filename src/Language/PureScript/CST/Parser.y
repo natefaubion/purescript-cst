@@ -20,7 +20,7 @@ import Language.PureScript.CST.Utils
 %name parseModule module
 %tokentype { SourceToken }
 %errorhandlertype explist
-%error { (error . show . (\(a, b) -> (map snd a, b))) }
+%error { parseError }
 
 %token
   '('             { (_, TokLeftParen) }
@@ -281,14 +281,19 @@ expr1 :: { Expr () }
 
 expr2 :: { Expr () }
   : exprAtom { $1 }
-  | exprAtom '.' label { ExprRecordAccessor () (RecordAccessor $1 $2 $3) }
-  | exprAtom '{' sep(recordUpdate, ',') '}' { ExprRecordUpdate () $1 (Wrapped $2 $3 $4) }
+  | exprAtom '.' sep(label, '.') { ExprRecordAccessor () (RecordAccessor $1 $2 $3) }
+  | expr2 '{' '}' { ExprApp () $1 (ExprRecord () (Wrapped $2 Nothing $3)) }
+  | expr2 '{' sep(recordUpdateOrLabel, ',') '}'
+      { case toRecordFields $3 of
+          Left xs -> ExprApp () $1 (ExprRecord () (Wrapped $2 (Just xs) $4))
+          Right xs -> ExprRecordUpdate () $1 (Wrapped $2 xs $4)
+      }
 
 exprAtom :: { Expr () }
   : '_' { ExprSection () $1 }
   | hole { ExprHole () $1 }
   | ident { ExprIdent () $1 }
-  | proper { ExprConstructor () $1 }
+  | properIdent { ExprConstructor () $1 }
   | boolean { uncurry (ExprBoolean ()) $1 }
   | char { uncurry (ExprChar ()) $1 }
   | string { uncurry (ExprString ()) $1 }
@@ -306,6 +311,12 @@ record(a) :: { Delimited (RecordLabeled _) }
 recordLabel(a) :: { RecordLabeled _ }
   : var { RecordPun $1 }
   | label ':' a { RecordField $1 $2 $3 }
+
+recordUpdateOrLabel :: { Either (RecordLabeled (Expr ())) (RecordUpdate ()) }
+  : label ':' expr { Left (RecordField $1 $2 $3) }
+  | label { Left (RecordPun (labelToVar $1)) }
+  | label '=' expr { Right (RecordUpdateLeaf $1 $2 $3) }
+  | label '{' sep(recordUpdate, ',') '}' { Right (RecordUpdateBranch $1 (Wrapped $2 $3 $4)) }
 
 recordUpdate :: { RecordUpdate () }
   : label '=' expr { RecordUpdateLeaf $1 $2 $3 }

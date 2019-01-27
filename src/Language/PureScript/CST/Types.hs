@@ -306,7 +306,7 @@ data RecordUpdate a
 data RecordAccessor a = RecordAccessor
   { recExpr :: Expr a
   , recDot :: SourceToken
-  , recField :: Ident
+  , recPath :: Separated Ident
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Infix a = Infix

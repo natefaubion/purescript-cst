@@ -4,9 +4,24 @@ import Prelude
 
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.List (intercalate)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Language.PureScript.CST.Types
+
+parseError :: ([SourceToken], [String]) -> a
+parseError (stream, toks) = error $ unlines
+  [ "Parse error at " <> position <> ""
+  , ""
+  , show $ take 10 $ map snd stream
+  , ""
+  , intercalate ", " toks
+  ]
+  where
+  position = case stream of
+    (TokenAnn (SourceRange (SourcePos line col) _) _ _, _) : _ ->
+      show line <> ":" <> show col
+    _ -> "EOF"
 
 placeholder :: SourceToken
 placeholder =
@@ -56,6 +71,9 @@ toLabel tok = case tok of
   (_, TokString _ a)     -> Ident tok [] a
   (_, TokRawString a)    -> Ident tok [] a
   _                      -> internalError $ "Invalid label: " <> show tok
+
+labelToVar :: Ident -> Ident
+labelToVar (Ident tok _ _) = toVar tok
 
 toString :: SourceToken -> (SourceToken, Text)
 toString tok = case tok of
@@ -123,7 +141,20 @@ toBinder = convert []
   done = \case
       BinderConstructor a ident [] : args -> BinderConstructor a ident args
       [a] -> a
-      _ -> internalError $  "Unexpected expression in binder 3"
+      _ -> internalError $ "Unexpected expression in binder 3"
+
+toRecordFields
+  :: Separated (Either (RecordLabeled (Expr ())) (RecordUpdate ()))
+  -> Either (Separated (RecordLabeled (Expr ()))) (Separated (RecordUpdate ()))
+toRecordFields = \case
+  Separated (Left a) as -> Left $ Separated a $ fmap unLeft <$> as
+  Separated (Right a) as -> Right $ Separated a $ fmap unRight <$> as
+  where
+  unLeft (Left tok) = tok
+  unLeft _ = internalError $ "Unexpected record update"
+
+  unRight (Right tok) = tok
+  unRight _ = internalError $ "Unexpected record constructor"
 
 toModuleDecls :: [Either (ImportDecl a) (Declaration a)] -> ([ImportDecl a], [Declaration a])
 toModuleDecls = goLeft []

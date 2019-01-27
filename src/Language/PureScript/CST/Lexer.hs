@@ -97,43 +97,48 @@ tokens = do
 
       mbLytStart = hasLayout lexTok
       tokCol = srcColumn lexPos
+      nextTokCol = srcColumn lexPos'
 
       k0 :: m LexerResult
-      k0 = case (head lexStack, closesLayout lexTok) of
-        ((indCol, LayoutIndent), Nothing)
-          | tokCol < indCol ->
-              uncurry k1 $ collapse lexPos lexStack lexAcc
-          | Just LayoutIndent <- mbLytStart, tokCol == indCol ->
-              k1 (tail lexStack) $ lexAcc `snoc` layoutToken lexPos TokLayoutEnd
-          | tokCol == indCol && not lytStarted ->
-              k1 lexStack $ lexAcc `snoc` layoutToken lexPos TokLayoutSep
-        ((indCol, LayoutIndent), Just LayoutIndent)
-          | indCol > 0 ->
-              k1 (tail lexStack) $ lexAcc `snoc` layoutToken lexPos TokLayoutEnd
-          | otherwise ->
-              k1 lexStack lexAcc
-        ((0, delim), Just delim') | delim' == delim ->
-          k1 (tail lexStack) $ lexAcc
-        (_, Nothing) ->
-          k1 lexStack lexAcc
-        _ -> fail $ "Mismatched delimiters or indentation"
+      k0 = case head lexStack of
+        (indCol, LayoutIndent) | tokCol < indCol ->
+          uncurry k1 $ collapse lexPos lexStack lexAcc
+        _ -> k1 lexStack lexAcc
 
       k1 :: LayoutStack -> DList SourceToken -> m LexerResult
-      k1 lexStack' lexAcc' =
-        k2 lexStack' $ lexAcc' `snoc` (tokAnn, lexTok)
+      k1 lexStack' lexAcc' = case (head lexStack', closesLayout lexTok) of
+        ((indCol, LayoutIndent), Nothing)
+          | Just LayoutIndent <- mbLytStart, nextTokCol == indCol ->
+              k2 (tail lexStack') $ lexAcc' `snoc` layoutToken lexPos TokLayoutEnd
+          | tokCol == indCol && not lytStarted ->
+              k2 lexStack' $ lexAcc' `snoc` layoutToken lexPos TokLayoutSep
+        ((indCol, LayoutIndent), Just LayoutIndent)
+          | indCol > 0 ->
+              k2 (tail lexStack') $ lexAcc' `snoc` layoutToken lexPos TokLayoutEnd
+          | otherwise ->
+              k2 lexStack' lexAcc'
+        ((0, delim), Just delim') | delim' == delim ->
+          k2 (tail lexStack') $ lexAcc'
+        (_, Nothing) ->
+          k2 lexStack' lexAcc'
+        _ -> fail $ "Mismatched delimiters or indentation"
 
       k2 :: LayoutStack -> DList SourceToken -> m LexerResult
-      k2 lexStack' lexAcc' = case mbLytStart of
-        Just LayoutIndent ->
-          k3 ((srcColumn lexPos', LayoutIndent) : lexStack') $
-            lexAcc' `snoc` layoutToken lexPos' TokLayoutStart
-        Just delim ->
-          k3 ((0, delim) : lexStack') lexAcc'
-        Nothing ->
-          k3 lexStack' lexAcc'
+      k2 lexStack' lexAcc' =
+        k3 lexStack' $ lexAcc' `snoc` (tokAnn, lexTok)
 
       k3 :: LayoutStack -> DList SourceToken -> m LexerResult
-      k3 lexStack' lexAcc' = P.optional token >>= \case
+      k3 lexStack' lexAcc' = case mbLytStart of
+        Just LayoutIndent ->
+          k4 ((srcColumn lexPos', LayoutIndent) : lexStack') $
+            lexAcc' `snoc` layoutToken lexPos' TokLayoutStart
+        Just delim ->
+          k4 ((0, delim) : lexStack') lexAcc'
+        Nothing ->
+          k4 lexStack' lexAcc'
+
+      k4 :: LayoutStack -> DList SourceToken -> m LexerResult
+      k4 lexStack' lexAcc' = P.optional token >>= \case
         Nothing -> do
           let result = DList.toList $ unwind lexPos' lexStack' lexAcc'
           pure (result, leading)
