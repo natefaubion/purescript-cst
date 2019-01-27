@@ -113,7 +113,7 @@ toBinder = convert []
     ExprBoolean a tok val -> done (BinderBoolean a tok val : acc)
     ExprChar a tok val -> done (BinderChar a tok val : acc)
     ExprString a tok val -> done (BinderString a tok val : acc)
-    ExprNumber a tok val -> done (BinderNumber a tok val : acc)
+    ExprNumber a tok val -> done (BinderNumber a Nothing tok val : acc)
     ExprArray a del -> done (BinderArray a (fmap (fmap toBinder) <$> del) : acc)
     ExprRecord a del -> done (BinderRecord a (fmap (fmap (fmap toBinder)) <$> del) : acc)
     ExprParens a wrap -> done (BinderParens a (toBinder <$> wrap) : acc)

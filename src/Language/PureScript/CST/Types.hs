@@ -117,7 +117,9 @@ data Type a
   | TypeKinded a (Type a) SourceToken (Kind a)
   | TypeApp a (Type a) (Type a)
   | TypeOp a (Type a) Ident (Type a)
+  | TypeOpName a (Wrapped Ident)
   | TypeArr a (Type a) SourceToken (Type a)
+  | TypeArrName a (Wrapped SourceToken)
   | TypeConstrained a (Type a) SourceToken (Type a)
   | TypeParens a (Wrapped (Type a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -279,7 +281,8 @@ data Expr a
   | ExprParens a (Wrapped (Expr a))
   | ExprTyped a (Expr a) SourceToken (Type a)
   | ExprOp a (Expr a) Ident (Expr a)
-  | ExprUnaryMinus a SourceToken (Expr a)
+  | ExprOpName a (Wrapped Ident)
+  | ExprNegate a SourceToken (Expr a)
   | ExprRecordAccessor a (RecordAccessor a)
   | ExprRecordUpdate a (Expr a) (DelimitedNonEmpty (RecordUpdate a))
   | ExprApp a (Expr a) (Expr a)
@@ -385,7 +388,7 @@ data Binder a
   | BinderBoolean a SourceToken Bool
   | BinderChar a SourceToken Char
   | BinderString a SourceToken Text
-  | BinderNumber a SourceToken (Either Integer Double)
+  | BinderNumber a (Maybe SourceToken) SourceToken (Either Integer Double)
   | BinderArray a (Delimited (Binder a))
   | BinderRecord a (Delimited (RecordLabeled (Binder a)))
   | BinderParens a (Wrapped (Binder a))

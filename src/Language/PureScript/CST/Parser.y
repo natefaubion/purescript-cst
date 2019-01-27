@@ -44,6 +44,7 @@ import Language.PureScript.CST.Utils
   '.'             { (_, TokDot) }
   ','             { (_, TokComma) }
   '_'             { (_, TokUnderscore) }
+  '-'             { (_, TokSymbol [] "-") }
   '@'             { (_, TokSymbol [] "@") }
   '#'             { (_, TokSymbol [] "#") }
   '..'            { (_, TokSymbol [] "..") }
@@ -135,6 +136,8 @@ var :: { Ident }
 
 symbol :: { Ident }
   : SYMBOL { toSymbol $1 }
+  | '<=' { toSymbol $1 }
+  | '-' { toSymbol $1 }
   | '@' { toSymbol $1 }
   | '#' { toSymbol $1 }
   | '..' { toSymbol $1 }
@@ -227,6 +230,8 @@ typeAtom :: { Type ()}
   | hole { TypeHole () $1 }
   | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
   | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
+  | '(' '->' ')' { TypeArrName () (Wrapped $1 $2 $3) }
+  | '(' symbol ')' { TypeOpName () (Wrapped $1 $2 $3) }
   | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
   | '(' typeKindedAtom '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
 
@@ -269,6 +274,7 @@ expr0 :: { Expr () }
   | expr0 expr1 { ExprApp () $1 $2 }
   | expr0 symbol expr1 { ExprOp () $1 $2 $3}
   | expr0 '`' expr '`' expr1 { ExprInfix () (Infix $1 $2 $3 $4 $5) }
+  --| '-' exprAtom { ExprNegate () $1 $2 }
 
 expr1 :: { Expr () }
   : expr2 { $1 }
@@ -300,6 +306,7 @@ exprAtom :: { Expr () }
   | number { uncurry (ExprNumber ()) $1 }
   | array(expr) { ExprArray () $1 }
   | record(expr) { ExprRecord () $1 }
+  | '(' symbol ')' { ExprOpName () (Wrapped $1 $2 $3) }
   | '(' expr ')' { ExprParens () (Wrapped $1 $2 $3) }
 
 array(a) :: { Delimited _ }
@@ -346,7 +353,7 @@ binderLiteral
   | boolean { uncurry (BinderBoolean ()) $1 }
   | char { uncurry (BinderChar ()) $1 }
   | string { uncurry (BinderString ()) $1 }
-  | number { uncurry (BinderNumber ()) $1 }
+  | number { uncurry (BinderNumber () Nothing) $1 }
   | array(binder) { BinderArray () $1 }
   | record(binder) { BinderRecord () $1 }
   | '(' binder ')' { BinderParens () (Wrapped $1 $2 $3) }

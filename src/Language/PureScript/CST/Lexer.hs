@@ -246,8 +246,8 @@ token = P.choice
   , P.label "character" $ uncurry TokChar <$> charLiteral
   , P.label "raw string" $ TokRawString <$> rawStringLiteral
   , P.label "string" $ uncurry TokString <$> stringLiteral
+  , P.try $ P.label "number" $ uncurry TokNumber <$> numberLiteral
   , P.label "integer" $ uncurry TokInt <$> intLiteral
-  , P.label "number" $ uncurry TokNumber <$> numberLiteral
   ]
 
 identifier :: Lexer e m => m Token
