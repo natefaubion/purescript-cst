@@ -140,6 +140,7 @@ symbol :: { Ident }
   | '-' { toSymbol $1 }
   | '@' { toSymbol $1 }
   | '#' { toSymbol $1 }
+  | ':' { toSymbol $1 }
   | '..' { toSymbol $1 }
 
 label :: { Ident }
@@ -317,20 +318,19 @@ exprAtom :: { Expr () }
   | char { uncurry (ExprChar ()) $1 }
   | string { uncurry (ExprString ()) $1 }
   | number { uncurry (ExprNumber ()) $1 }
-  | array(expr) { ExprArray () $1 }
-  | record(expr) { ExprRecord () $1 }
+  | array { ExprArray () $1 }
+  | record { ExprRecord () $1 }
   | '(' symbol ')' { ExprOpName () (Wrapped $1 $2 $3) }
   | '(' expr ')' { ExprParens () (Wrapped $1 $2 $3) }
 
-array(a) :: { Delimited _ }
-  : delim('[', a, ',', ']') { $1 }
+array :: { Delimited (Expr ()) }
+  : delim('[', expr, ',', ']') { $1 }
 
-record(a) :: { Delimited (RecordLabeled _) }
-  : delim('{', recordLabel(a), ',', '}') { $1 }
+record :: { Delimited (RecordLabeled (Expr ())) }
+  : delim('{', recordLabel, ',', '}') { $1 }
 
-recordLabel(a) :: { RecordLabeled _ }
-  : var { RecordPun $1 }
-  | label ':' a { RecordField $1 $2 $3 }
+recordLabel :: { RecordLabeled (Expr ()) }
+  : expr { toRecordLabeled $1 }
 
 recordUpdateOrLabel :: { Either (RecordLabeled (Expr ())) (RecordUpdate ()) }
   : label ':' expr { Left (RecordField $1 $2 $3) }

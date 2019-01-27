@@ -155,9 +155,28 @@ toDecl expr = case toBinders expr of
   BinderVar a ident : args -> (a, ident, args)
   _ -> internalError $ "Unexpected expression in declaration lhs"
 
+toRecordLabeled :: Expr a -> RecordLabeled (Expr a)
+toRecordLabeled = go1
+  where
+  go1 = \case
+    ExprIdent _ ident@(Ident _ [] _) ->
+      RecordPun ident
+    expr -> go2 id expr
+
+  go2 k = \case
+    ExprOp _ (ExprIdent _ ident@(Ident _ [] _)) (Ident tok [] ":") rhs ->
+      RecordField ident tok (k rhs)
+    ExprOp a lhs ident rhs ->
+      go2 (k . (\lhs' -> ExprOp a lhs' ident rhs)) lhs
+    ExprTyped a lhs tok rhs ->
+      go2 (k . (\lhs' -> ExprTyped a lhs' tok rhs)) lhs
+    _ ->
+      internalError $ "Unexpected expression in record"
+
+
 toRecordFields
-  :: Separated (Either (RecordLabeled (Expr ())) (RecordUpdate ()))
-  -> Either (Separated (RecordLabeled (Expr ()))) (Separated (RecordUpdate ()))
+  :: Separated (Either (RecordLabeled (Expr a)) (RecordUpdate a))
+  -> Either (Separated (RecordLabeled (Expr a))) (Separated (RecordUpdate a))
 toRecordFields = \case
   Separated (Left a) as -> Left $ Separated a $ fmap unLeft <$> as
   Separated (Right a) as -> Right $ Separated a $ fmap unRight <$> as
