@@ -103,28 +103,28 @@ toBoolean tok = case tok of
   (_, TokLowerName [] "false") -> (tok, False)
   _                            -> internalError $ "Invalid boolean literal: " <> show tok
 
-toBinder :: forall a. Show a => Monoid a => Expr a -> Binder a
-toBinder = convert []
+toBinders :: forall a. Monoid a => Expr a -> [Binder a]
+toBinders = convert []
   where
   convert acc = \case
-    ExprSection a tok -> done (BinderWildcard a tok : acc)
-    ExprIdent a ident@(Ident _ [] _) -> done (BinderVar a ident : acc)
-    ExprConstructor a ident -> done (BinderConstructor a ident [] : acc)
-    ExprBoolean a tok val -> done (BinderBoolean a tok val : acc)
-    ExprChar a tok val -> done (BinderChar a tok val : acc)
-    ExprString a tok val -> done (BinderString a tok val : acc)
-    ExprNumber a tok val -> done (BinderNumber a Nothing tok val : acc)
-    ExprArray a del -> done (BinderArray a (fmap (fmap toBinder) <$> del) : acc)
-    ExprRecord a del -> done (BinderRecord a (fmap (fmap (fmap toBinder)) <$> del) : acc)
-    ExprParens a wrap -> done (BinderParens a (toBinder <$> wrap) : acc)
-    ExprTyped a expr tok ty -> done (BinderTyped a (toBinder expr) tok ty : acc)
+    ExprSection a tok -> BinderWildcard a tok : acc
+    ExprIdent a ident@(Ident _ [] _) -> BinderVar a ident : acc
+    ExprConstructor a ident -> BinderConstructor a ident [] : acc
+    ExprBoolean a tok val -> BinderBoolean a tok val : acc
+    ExprChar a tok val -> BinderChar a tok val : acc
+    ExprString a tok val -> BinderString a tok val : acc
+    ExprNumber a tok val -> BinderNumber a Nothing tok val : acc
+    ExprArray a del -> BinderArray a (fmap (fmap toBinder) <$> del) : acc
+    ExprRecord a del -> BinderRecord a (fmap (fmap (fmap toBinder)) <$> del) : acc
+    ExprParens a wrap -> BinderParens a (toBinder <$> wrap) : acc
+    ExprTyped a expr tok ty -> BinderTyped a (toBinder expr) tok ty : acc
     ExprOp a lhs (Ident op [] "@") rhs ->
       case splitNamed lhs of
         (lhs', ExprIdent a' ident@(Ident _ [] _)) -> do
           let acc' = BinderNamed (a <> a') ident op (toBinder rhs) : acc
-          maybe (done acc') (convert acc') lhs'
+          maybe acc' (convert acc') lhs'
         _ -> internalError "Unexpected expression in binder 1"
-    ExprOp a lhs op rhs -> done (BinderOp a (toBinder lhs) op (toBinder rhs) : acc)
+    ExprOp a lhs op rhs -> BinderOp a (toBinder lhs) op (toBinder rhs) : acc
     ExprApp _ lhs rhs -> convert (toBinder rhs : acc) lhs
     _ -> internalError "Unexpected expression in binder 2"
 
@@ -137,11 +137,23 @@ toBinder = convert []
     expr ->
       (Nothing, expr)
 
-  done :: [Binder a] -> Binder a
-  done = \case
-      BinderConstructor a ident [] : args -> BinderConstructor a ident args
-      [a] -> a
-      _ -> internalError $ "Unexpected expression in binder 3"
+toBinder :: forall a. Monoid a => Expr a -> Binder a
+toBinder expr = case toBinders expr of
+  BinderConstructor a ident [] : args -> BinderConstructor a ident args
+  [a] -> a
+  _ -> internalError $ "Unexpected expression in binder 3"
+
+toDeclOrBinder :: forall a. Monoid a => Expr a -> Either (a, Ident, [Binder a]) (Binder a)
+toDeclOrBinder expr = case toBinders expr of
+  BinderVar a ident : args -> Left (a, ident, args)
+  BinderConstructor a ident [] : args -> Right $ BinderConstructor a ident args
+  [a] -> Right $ a
+  _ -> internalError $ "Unexpected expression in binder 4"
+
+toDecl :: forall a. Monoid a => Expr a -> (a, Ident, [Binder a])
+toDecl expr = case toBinders expr of
+  BinderVar a ident : args -> (a, ident, args)
+  _ -> internalError $ "Unexpected expression in declaration lhs"
 
 toRecordFields
   :: Separated (Either (RecordLabeled (Expr ())) (RecordUpdate ()))

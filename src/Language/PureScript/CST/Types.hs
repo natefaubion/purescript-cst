@@ -280,13 +280,13 @@ data Expr a
   | ExprRecord a (Delimited (RecordLabeled (Expr a)))
   | ExprParens a (Wrapped (Expr a))
   | ExprTyped a (Expr a) SourceToken (Type a)
+  | ExprInfix a (Expr a) (Wrapped (Expr a)) (Expr a)
   | ExprOp a (Expr a) Ident (Expr a)
   | ExprOpName a (Wrapped Ident)
   | ExprNegate a SourceToken (Expr a)
   | ExprRecordAccessor a (RecordAccessor a)
   | ExprRecordUpdate a (Expr a) (DelimitedNonEmpty (RecordUpdate a))
   | ExprApp a (Expr a) (Expr a)
-  | ExprInfix a (Infix a)
   | ExprLambda a (Lambda a)
   | ExprIf a (IfThenElse a)
   | ExprCase a (CaseOf a)
@@ -310,14 +310,6 @@ data RecordAccessor a = RecordAccessor
   { recExpr :: Expr a
   , recDot :: SourceToken
   , recPath :: Separated Ident
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
-
-data Infix a = Infix
-  { ifxLhs :: Expr a
-  , ifxOpen :: SourceToken
-  , ifxExpr :: Expr a
-  , ifxClose :: SourceToken
-  , ifxRhs :: Expr a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Lambda a = Lambda

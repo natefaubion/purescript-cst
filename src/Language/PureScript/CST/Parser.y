@@ -271,25 +271,38 @@ expr :: { Expr () }
 
 expr0 :: { Expr () }
   : expr1 { $1 }
-  | expr0 expr1 { ExprApp () $1 $2 }
-  | expr0 symbol expr1 { ExprOp () $1 $2 $3}
-  | expr0 '`' expr '`' expr1 { ExprInfix () (Infix $1 $2 $3 $4 $5) }
-  --| '-' exprAtom { ExprNegate () $1 $2 }
+  | expr0 symbol expr1 { ExprOp () $1 $2 $3 }
 
 expr1 :: { Expr () }
   : expr2 { $1 }
+  | expr1 '`' exprBacktick '`' expr2 { ExprInfix () $1 (Wrapped $2 $3 $4) $5 }
+
+exprBacktick :: { Expr () }
+  : expr2 { $1 }
+  | exprBacktick symbol expr2 { ExprOp () $1 $2 $3 }
+
+expr2 :: { Expr () }
+  : expr3 { $1 }
+  | '-' expr3 { ExprNegate () $1 $2 }
+
+expr3 :: { Expr () }
+  : expr4 { $1 }
+  | expr3 expr4 { ExprApp () $1 $2 }
+
+expr4 :: { Expr () }
+  : expr5 { $1 }
   | 'if' expr 'then' expr 'else' expr { ExprIf () (IfThenElse $1 $2 $3 $4 $5 $6) }
   | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
   | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
   | 'do' '\{' manySep(doStatement, '\;') '\}' { ExprDo () (DoBlock $1 $3) }
   | 'ado' '\{' manySep(doStatement, '\;') '\}' 'in' expr { ExprAdo () (AdoBlock $1 $3 $5 $6) }
-  | 'lambda' many(binder) '->' expr { ExprLambda () (Lambda $1 $2 $3 $4) }
+  | 'lambda' many(exprAtom) '->' expr { ExprLambda () (Lambda $1 (fmap toBinder $2) $3 $4) }
 
-expr2 :: { Expr () }
+expr5 :: { Expr () }
   : exprAtom { $1 }
   | exprAtom '.' sep(label, '.') { ExprRecordAccessor () (RecordAccessor $1 $2 $3) }
-  | expr2 '{' '}' { ExprApp () $1 (ExprRecord () (Wrapped $2 Nothing $3)) }
-  | expr2 '{' sep(recordUpdateOrLabel, ',') '}'
+  | expr5 '{' '}' { ExprApp () $1 (ExprRecord () (Wrapped $2 Nothing $3)) }
+  | expr5 '{' sep(recordUpdateOrLabel, ',') '}'
       { case toRecordFields $3 of
           Left xs -> ExprApp () $1 (ExprRecord () (Wrapped $2 (Just xs) $4))
           Right xs -> ExprRecordUpdate () $1 (Wrapped $2 xs $4)
@@ -331,35 +344,20 @@ recordUpdate :: { RecordUpdate () }
 
 letBinding :: { LetBinding () }
   : var '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
-  | var manyOrEmpty(binderAtom) guarded('=') { LetBindingName () (ValueBindingFields $1 $2 $3) }
-  | binderLiteral '=' expr { LetBindingPattern () $1 $2 $3 }
-
-binder
-  : binder0 { $1 }
-  | binder symbol binder0 { BinderOp () $1 $2 $3 }
-
-binder0
-  : binderAtom { $1 }
-  | properIdent many(binderAtom) { BinderConstructor () $1 $2 }
-
-binderAtom
-  : binderLiteral { $1 }
-  | var { BinderVar () $1 }
-
-binderLiteral
-  : '_' { BinderWildcard () $1 }
-  | var '@' binderAtom { BinderNamed () $1 $2 $3 }
-  | properIdent { BinderConstructor () $1 [] }
-  | boolean { uncurry (BinderBoolean ()) $1 }
-  | char { uncurry (BinderChar ()) $1 }
-  | string { uncurry (BinderString ()) $1 }
-  | number { uncurry (BinderNumber () Nothing) $1 }
-  | array(binder) { BinderArray () $1 }
-  | record(binder) { BinderRecord () $1 }
-  | '(' binder ')' { BinderParens () (Wrapped $1 $2 $3) }
+  | expr0 guarded('=')
+      { case toDeclOrBinder $1 of
+          Left (ann, ident, binders) ->
+            LetBindingName ann (ValueBindingFields ident binders $2)
+          Right binder ->
+            case $2 of
+              Unconditional tok expr ->
+                LetBindingPattern () binder tok expr
+              Guarded _ ->
+                internalError "Unexpected guard in let binding"
+      }
 
 caseBranch :: { (Separated (Binder ()), Guarded ()) }
-  : sep(binder, ',') guarded('->') { ($1, $2) }
+  : sep(expr0, ',') guarded('->') { (fmap toBinder $1, $2) }
 
 guarded(a) :: { Guarded () }
   : a exprWhere { Unconditional $1 $2 }
@@ -369,18 +367,12 @@ guardedExpr(a) :: { GuardedExpr () }
   : '|' sep(patternGuard, ',') a expr { GuardedExpr $1 $2 $3 $4 }
 
 patternGuard :: { PatternGuard () }
-  : expr { PatternGuard Nothing $1 }
-  -- Binder is parsed as an expr due to reduce/reduce conflicts between the
-  -- two syntaxes. We would have to inline most of the expr and binder
-  -- grammar to resolve it.
-  | expr '<-' expr1 { PatternGuard (Just (toBinder $1, $2)) $3 }
+  : expr0 { PatternGuard Nothing $1 }
+  | expr '<-' expr0 { PatternGuard (Just (toBinder $1, $2)) $3 }
 
 doStatement :: { DoStatement () }
   : 'let' '\{' manySep(letBinding, '\;') '\}' { DoLet $1 $3 }
   | expr { DoDiscard $1 }
-  -- Binder is parsed as an expr due to reduce/reduce conflicts between the
-  -- two syntaxes. We would have to inline most of the expr and binder
-  -- grammar to resolve it.
   | expr '<-' expr { DoBind (toBinder $1) $2 $3 }
 
 module :: { Module () }
@@ -443,7 +435,11 @@ decl :: { Declaration () }
   | 'derive' instHead { DeclDerive () $1 Nothing $2 }
   | 'derive' 'newtype' instHead { DeclDerive () $1 (Just $2) $3 }
   | ident '::' type { DeclSignature () (Labeled $1 $2 $3) }
-  | ident manyOrEmpty(binder) guarded('=') { DeclValue () (ValueBindingFields $1 $2 $3) }
+  | expr0 guarded('=')
+      { case toDecl $1 of
+          (ann, ident, binders) ->
+            DeclValue ann (ValueBindingFields ident binders $2)
+      }
   | fixity { DeclFixity () $1 }
   | 'foreign' 'import' foreign { DeclForeign () $1 $2 $3 }
 
@@ -502,7 +498,11 @@ constraint :: { Type () }
 
 instBinding :: { InstanceBinding () }
   : ident '::' type { InstanceBindingSignature () (Labeled $1 $2 $3) }
-  | ident manyOrEmpty(binder) guarded('=') { InstanceBindingName () (ValueBindingFields $1 $2 $3) }
+  | expr0 guarded('=')
+      { case toDecl $1 of
+          (ann, ident, binders) ->
+            InstanceBindingName ann (ValueBindingFields ident binders $2)
+      }
 
 fixity :: { DeclFixityFields () }
   : infix int ident 'as' symbol { DeclFixityFields $1 $2 Nothing $3 $4 $5 }
