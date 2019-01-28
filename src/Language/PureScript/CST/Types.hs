@@ -160,17 +160,22 @@ data DataMembers a
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Declaration a
-  = DeclData a (DeclDataHead a) (Maybe (SourceToken, Separated (DeclDataCtor a)))
-  | DeclType a (DeclDataHead a) SourceToken (Type a)
-  | DeclNewtype a (DeclDataHead a) SourceToken Ident (Type a)
-  | DeclClass a (DeclClassHead a) (Maybe (SourceToken, [Labeled (Type a)]))
-  | DeclInstance a (DeclInstanceHead a) (Maybe (SourceToken, [InstanceBinding a]))
-  | DeclDerive a SourceToken (Maybe SourceToken) (DeclInstanceHead a)
+  = DeclData a (DataHead a) (Maybe (SourceToken, Separated (DataCtor a)))
+  | DeclType a (DataHead a) SourceToken (Type a)
+  | DeclNewtype a (DataHead a) SourceToken Ident (Type a)
+  | DeclClass a (ClassHead a) (Maybe (SourceToken, [Labeled (Type a)]))
+  | DeclInstanceChain a (Separated (Instance a))
+  | DeclDerive a SourceToken (Maybe SourceToken) (InstanceHead a)
   | DeclSignature a (Labeled (Type a))
   | DeclValue a (ValueBindingFields a)
-  | DeclFixity a (DeclFixityFields a)
+  | DeclFixity a (FixityFields a)
   | DeclForeign a SourceToken SourceToken (Foreign a)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
+
+data Instance a = Instance
+  { instHead :: InstanceHead a
+  , instBody :: Maybe (SourceToken, [InstanceBinding a])
+  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data InstanceBinding a
   = InstanceBindingSignature a (Labeled (Type a))
@@ -181,7 +186,7 @@ data ImportDecl a = ImportDecl
   { impAnn :: a
   , impKeyword :: SourceToken
   , impModule :: Ident
-  , impNames :: Maybe (DelimitedNonEmpty (Import a))
+  , impNames :: Maybe (Maybe SourceToken, DelimitedNonEmpty (Import a))
   , impQualification :: Maybe (SourceToken, Ident)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
@@ -194,33 +199,33 @@ data Import a
   | ImportKind a SourceToken Ident
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data DeclDataHead a = DeclDataHead
+data DataHead a = DataHead
   { dataHdKeyword :: SourceToken
   , dataHdName :: Ident
   , dataHdVars :: [TypeVarBinding a]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data DeclDataCtor a = DeclDataCtor
+data DataCtor a = DataCtor
   { dataCtorAnn :: a
   , dataCtorName :: Ident
   , dataCtorFields :: [Type a]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data DeclClassHead a = DeclClassHead
+data ClassHead a = ClassHead
   { clsKeyword :: SourceToken
   , clsSuper :: Maybe (OneOrDelimited (Type a), SourceToken)
   , clsName :: Ident
   , clsVars :: [TypeVarBinding a]
-  , clsFundeps :: Maybe (SourceToken, Separated DeclClassFundep)
+  , clsFundeps :: Maybe (SourceToken, Separated ClassFundep)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data DeclClassFundep = DeclClassFundep
+data ClassFundep = ClassFundep
   { fndLhs :: [Ident]
   , fndArr :: SourceToken
   , fndRhs :: [Ident]
   } deriving (Show, Eq, Ord, Generic)
 
-data DeclInstanceHead a = DeclInstanceHead
+data InstanceHead a = InstanceHead
   { instKeyword :: SourceToken
   , instName :: Ident
   , instSep :: SourceToken
@@ -229,7 +234,7 @@ data DeclInstanceHead a = DeclInstanceHead
   , instTypes :: [Type a]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
-data DeclFixityFields a = DeclFixityFields
+data FixityFields a = FixityFields
   { fxtKeyword :: SourceToken
   , fxtNum :: (SourceToken, Integer)
   , fxtType :: Maybe SourceToken

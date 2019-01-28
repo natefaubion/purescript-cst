@@ -173,7 +173,6 @@ toRecordLabeled = go1
     _ ->
       internalError $ "Unexpected expression in record"
 
-
 toRecordFields
   :: Separated (Either (RecordLabeled (Expr a)) (RecordUpdate a))
   -> Either (Separated (RecordLabeled (Expr a))) (Separated (RecordUpdate a))
@@ -187,15 +186,22 @@ toRecordFields = \case
   unRight (Right tok) = tok
   unRight _ = internalError $ "Unexpected record constructor"
 
-toModuleDecls :: [Either (ImportDecl a) (Declaration a)] -> ([ImportDecl a], [Declaration a])
-toModuleDecls = goLeft []
-  where
-  goLeft acc (Left x : xs) = goLeft (x : acc) xs
-  goLeft acc xs = (reverse acc, goRight [] xs)
+data TmpModuleDecl a
+  = TmpImport (ImportDecl a)
+  | TmpDecl (Declaration a)
+  | TmpChain SourceToken (Declaration a)
 
-  goRight acc [] = reverse acc
-  goRight acc (Right x : xs) = goRight (x : acc) xs
-  goRight _ (Left _ : _) = internalError $ "Import declaration must appear at the start of a module"
+toModuleDecls :: Monoid a => [TmpModuleDecl a] -> ([ImportDecl a], [Declaration a])
+toModuleDecls = goImport []
+  where
+  goImport acc (TmpImport x : xs) = goImport (x : acc) xs
+  goImport acc xs = (reverse acc, goDecl [] xs)
+
+  goDecl acc [] = reverse acc
+  goDecl acc (TmpDecl x : xs) = goDecl (x : acc) xs
+  goDecl (DeclInstanceChain a (Separated h t) : acc) (TmpChain tok (DeclInstanceChain a' (Separated h' t')) : xs) =
+    goDecl (DeclInstanceChain (a <> a') (Separated h (t <> ((tok, h') : t'))) : acc) xs
+  goDecl _ _ = internalError $ "Invalid keyword else"
 
 varToType :: Monoid a => TypeVarBinding a -> Type a
 varToType (TypeVarKinded (Wrapped l (Labeled var tok kind) r)) =
@@ -219,7 +225,6 @@ reservedNames = Set.fromList
   , "forall"
   , "foreign"
   , "import"
-  , "kind"
   , "if"
   , "in"
   , "infix"

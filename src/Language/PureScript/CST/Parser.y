@@ -61,6 +61,7 @@ import Language.PureScript.CST.Utils
   'forall'        { (_, TokLowerName [] "forall") }
   'forallu'       { (_, TokSymbol [] "∀") }
   'foreign'       { (_, TokLowerName [] "foreign") }
+  'hiding'        { (_, TokLowerName [] "hiding") }
   'import'        { (_, TokLowerName [] "import") }
   'if'            { (_, TokLowerName [] "if") }
   'in'            { (_, TokLowerName [] "in") }
@@ -130,9 +131,13 @@ proper :: { Ident }
 ident :: { Ident }
   : IDENT { toIdent $1 }
   | QUAL_IDENT { toIdent $1 }
+  | 'as' { toIdent $1 }
+  | 'kind' { toIdent $1 }
 
 var :: { Ident }
   : IDENT { toVar $1 }
+  | 'as' { toVar $1 }
+  | 'kind' { toVar $1 }
 
 symbol :: { Ident }
   : SYMBOL { toSymbol $1 }
@@ -159,6 +164,7 @@ label :: { Ident }
   | 'forall' { toLabel $1 }
   | 'forallu' { toLabel $1 }
   | 'foreign' { toLabel $1 }
+  | 'hiding' { toLabel $1 }
   | 'import' { toLabel $1 }
   | 'if' { toLabel $1 }
   | 'in' { toLabel $1 }
@@ -293,11 +299,11 @@ expr3 :: { Expr () }
 expr4 :: { Expr () }
   : expr5 { $1 }
   | 'if' expr 'then' expr 'else' expr { ExprIf () (IfThenElse $1 $2 $3 $4 $5 $6) }
-  | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
   | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
   | 'do' '\{' manySep(doStatement, '\;') '\}' { ExprDo () (DoBlock $1 $3) }
   | 'ado' '\{' manySep(doStatement, '\;') '\}' 'in' expr { ExprAdo () (AdoBlock $1 $3 $5 $6) }
-  | 'lambda' many(exprAtom) '->' expr { ExprLambda () (Lambda $1 (fmap toBinder $2) $3 $4) }
+  | 'lambda' expr0 '->' expr { ExprLambda () (Lambda $1 (toBinders $2) $3 $4) }
+  | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
 
 expr5 :: { Expr () }
   : exprAtom { $1 }
@@ -364,7 +370,7 @@ guarded(a) :: { Guarded () }
   | many(guardedExpr(a)) { Guarded $1 }
 
 guardedExpr(a) :: { GuardedExpr () }
-  : '|' sep(patternGuard, ',') a expr { GuardedExpr $1 $2 $3 $4 }
+  : '|' sep(patternGuard, ',') a exprWhere { GuardedExpr $1 $2 $3 $4 }
 
 patternGuard :: { PatternGuard () }
   : expr0 { PatternGuard Nothing $1 }
@@ -376,16 +382,21 @@ doStatement :: { DoStatement () }
   | expr '<-' expr { DoBind (toBinder $1) $2 $3 }
 
 module :: { Module () }
-  : 'module' properIdent exports 'where' '\{' moduleDecls '\}'
+  : 'module' properIdent exports 'where' '\{' moduleDecls
       { uncurry (Module () $1 $2 $3 $4) $6 }
 
 moduleDecls :: { ([ImportDecl ()], [Declaration ()]) }
-  : {- empty -} { ([], []) }
-  | manySep(moduleDecl, '\;') { toModuleDecls($1) }
+  : manyOrEmpty(moduleDecl) { toModuleDecls $1 }
 
-moduleDecl :: { Either (ImportDecl ()) (Declaration ()) }
-  : importDecl { Left $1 }
-  | decl { Right $1 }
+moduleDecl :: { TmpModuleDecl a }
+  : importDecl modSep { TmpImport $1 }
+  | decl modSep { TmpDecl $1 }
+  | 'else' '\;' decl modSep { TmpChain $1 $3 }
+  | 'else' decl modSep { TmpChain $1 $2 }
+
+modSep
+  : '\;' { $1 }
+  | '\}' { $1 }
 
 exports :: { Maybe (DelimitedNonEmpty (Export ())) }
   : {- empty -} { Nothing }
@@ -410,9 +421,10 @@ importDecl :: { ImportDecl () }
   : 'import' properIdent imports { ImportDecl () $1 $2 $3 Nothing }
   | 'import' properIdent imports 'as' proper { ImportDecl () $1 $2 $3 (Just ($4, $5)) }
 
-imports :: { Maybe (DelimitedNonEmpty (Import ())) }
+imports :: { Maybe (Maybe SourceToken, DelimitedNonEmpty (Import ())) }
   : {- empty -} { Nothing }
-  | '(' sep(import, ',') ')' { Just (Wrapped $1 $2 $3) }
+  | '(' sep(import, ',') ')' { Just (Nothing, Wrapped $1 $2 $3) }
+  | 'hiding' '(' sep(import, ',') ')' { Just (Just $1, Wrapped $2 $3 $4) }
 
 import :: { Import () }
   : var { ImportValue () $1 }
@@ -429,9 +441,11 @@ decl :: { Declaration () }
   | typeHead '=' type { DeclType () $1 $2 $3 }
   | newtypeHead '=' properIdent typeAtom { DeclNewtype () $1 $2 $3 $4 }
   | classHead { DeclClass () $1 Nothing }
-  | classHead 'where' '\{' manySep(classMember, '\;') '\}' { DeclClass () $1 (Just ($2, $4)) }
-  | instHead { DeclInstance () $1 Nothing }
-  | instHead 'where' '\{' manySep(instBinding, '\;') '\}' { DeclInstance () $1 (Just ($2, $4)) }
+  | classHead 'where' '\{' manySep(classMember, '\;') '\}'
+      { DeclClass () $1 (Just ($2, $4)) }
+  | instHead { DeclInstanceChain () (Separated (Instance $1 Nothing) []) }
+  | instHead 'where' '\{' manySep(instBinding, '\;') '\}'
+      { DeclInstanceChain () (Separated (Instance $1 (Just ($2, $4))) []) }
   | 'derive' instHead { DeclDerive () $1 Nothing $2 }
   | 'derive' 'newtype' instHead { DeclDerive () $1 (Just $2) $3 }
   | ident '::' type { DeclSignature () (Labeled $1 $2 $3) }
@@ -443,50 +457,50 @@ decl :: { Declaration () }
   | fixity { DeclFixity () $1 }
   | 'foreign' 'import' foreign { DeclForeign () $1 $2 $3 }
 
-dataHead :: { DeclDataHead () }
-  : 'data' properIdent manyOrEmpty(typeVarBinding) { DeclDataHead $1 $2 $3 }
+dataHead :: { DataHead () }
+  : 'data' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
-typeHead :: { DeclDataHead () }
-  : 'type' properIdent manyOrEmpty(typeVarBinding) { DeclDataHead $1 $2 $3 }
+typeHead :: { DataHead () }
+  : 'type' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
-newtypeHead :: { DeclDataHead () }
-  : 'newtype' properIdent manyOrEmpty(typeVarBinding) { DeclDataHead $1 $2 $3 }
+newtypeHead :: { DataHead () }
+  : 'newtype' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
-dataCtor :: { DeclDataCtor () }
-  : properIdent manyOrEmpty(type) { DeclDataCtor () $1 $2 }
+dataCtor :: { DataCtor () }
+  : properIdent manyOrEmpty(type) { DataCtor () $1 $2 }
 
-classHead :: { DeclClassHead () }
-  : 'class' classNameAndVars fundeps { DeclClassHead $1 Nothing (fst $2) (snd $2) $3 }
+classHead :: { ClassHead () }
+  : 'class' classNameAndVars fundeps { ClassHead $1 Nothing (fst $2) (snd $2) $3 }
   -- We need to inline constraints due to the reduce/reduce conflict between
   -- the class name and vars and constraint syntax.
   | 'class' classNameAndVars '<=' classNameAndVars fundeps
-      { DeclClassHead $1
+      { ClassHead $1
           (Just (One (foldl' (TypeApp ()) (TypeVar () (fst $2)) (fmap varToType (snd $2))), $3))
           (fst $4)
           (snd $4)
           $5 }
   | 'class' '(' sep(constraint, ',') ')' '<=' classNameAndVars fundeps
-      { DeclClassHead $1 (Just (Many (Wrapped $2 $3 $4), $5)) (fst $6) (snd $6) $7 }
+      { ClassHead $1 (Just (Many (Wrapped $2 $3 $4), $5)) (fst $6) (snd $6) $7 }
 
 classNameAndVars :: { (Ident, [TypeVarBinding ()]) }
   : properIdent manyOrEmpty(typeVarBinding) { ($1, $2) }
 
-fundeps :: { Maybe (SourceToken, Separated DeclClassFundep) }
+fundeps :: { Maybe (SourceToken, Separated ClassFundep) }
   : {- empty -} { Nothing }
   | '|' sep(fundep, ',') { Just ($1, $2) }
 
-fundep :: { DeclClassFundep }
-  : '->' many(ident) { DeclClassFundep [] $1 $2 }
-  | many(ident) '->' many(ident) { DeclClassFundep $1 $2 $3 }
+fundep :: { ClassFundep }
+  : '->' many(ident) { ClassFundep [] $1 $2 }
+  | many(ident) '->' many(ident) { ClassFundep $1 $2 $3 }
 
 classMember :: { Labeled (Type ()) }
   : ident '::' type { Labeled $1 $2 $3 }
 
-instHead :: { DeclInstanceHead () }
+instHead :: { InstanceHead () }
   : 'instance' ident '::' constraints '=>' properIdent manyOrEmpty(typeAtom)
-      { DeclInstanceHead $1 $2 $3 (Just ($4, $5)) $6 $7 }
+      { InstanceHead $1 $2 $3 (Just ($4, $5)) $6 $7 }
   | 'instance' ident '::' properIdent manyOrEmpty(typeAtom)
-      { DeclInstanceHead $1 $2 $3 Nothing $4 $5 }
+      { InstanceHead $1 $2 $3 Nothing $4 $5 }
 
 constraints :: { OneOrDelimited (Type ()) }
   : constraint { One $1 }
@@ -504,9 +518,10 @@ instBinding :: { InstanceBinding () }
             InstanceBindingName ann (ValueBindingFields ident binders $2)
       }
 
-fixity :: { DeclFixityFields () }
-  : infix int ident 'as' symbol { DeclFixityFields $1 $2 Nothing $3 $4 $5 }
-  | infix int 'type' properIdent 'as' symbol { DeclFixityFields $1 $2 (Just $3) $4 $5 $6 }
+fixity :: { FixityFields () }
+  : infix int var 'as' symbol { FixityFields $1 $2 Nothing $3 $4 $5 }
+  | infix int proper 'as' symbol { FixityFields $1 $2 Nothing $3 $4 $5 }
+  | infix int 'type' proper 'as' symbol { FixityFields $1 $2 (Just $3) $4 $5 $6 }
 
 infix :: { SourceToken }
   : 'infix' { $1 }

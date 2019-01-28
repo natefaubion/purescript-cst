@@ -32,7 +32,15 @@ data LayoutDelim
   = LayoutParen
   | LayoutBrace
   | LayoutSquare
-  | LayoutIndent
+  | LayoutIndent LayoutTerm
+  deriving (Show, Eq)
+
+data LayoutTerm
+  = LayoutLet
+  | LayoutWhere
+  | LayoutOf
+  | LayoutDo
+  | LayoutRoot
   deriving (Show, Eq)
 
 type LayoutStack = [(Int, LayoutDelim)]
@@ -51,19 +59,20 @@ hasLayout = \case
   TokLeftParen -> Just LayoutParen
   TokLeftBrace -> Just LayoutBrace
   TokLeftSquare -> Just LayoutSquare
-  TokLowerName [] "let" -> Just LayoutIndent
-  TokLowerName [] "where" -> Just LayoutIndent
-  TokLowerName [] "do" -> Just LayoutIndent
-  TokLowerName [] "of" -> Just LayoutIndent
+  TokLowerName [] "let" -> Just (LayoutIndent LayoutLet)
+  TokLowerName [] "where" -> Just (LayoutIndent LayoutWhere)
+  TokLowerName [] "of" -> Just (LayoutIndent LayoutOf)
+  TokLowerName _ "do" -> Just (LayoutIndent LayoutDo)
   _ -> Nothing
 
-closesLayout :: Token -> Maybe LayoutDelim
+closesLayout :: Token -> [LayoutDelim]
 closesLayout = \case
-  TokRightParen -> Just LayoutParen
-  TokRightBrace -> Just LayoutBrace
-  TokRightSquare -> Just LayoutSquare
-  TokLowerName [] "in" -> Just LayoutIndent
-  _ -> Nothing
+  TokRightParen -> [LayoutParen]
+  TokRightBrace -> [LayoutBrace]
+  TokRightSquare -> [LayoutSquare]
+  TokLowerName [] "in" -> [LayoutIndent LayoutLet]
+  TokLowerName [] "where" -> [LayoutIndent LayoutOf, LayoutIndent LayoutDo]
+  _ -> []
 
 tokens :: forall e m. Lexer e m => m LexerResult
 tokens = do
@@ -77,7 +86,7 @@ tokens = do
         , lexLeading = leading
         , lexTok = tok
         , lexPos = advanceLeading (SourcePos 1 1) leading
-        , lexStack = [(0, LayoutIndent)]
+        , lexStack = [(0, LayoutIndent LayoutRoot)]
         }
   where
   loop :: Bool -> LexerState -> m LexerResult
@@ -101,27 +110,27 @@ tokens = do
 
       k0 :: m LexerResult
       k0 = case head lexStack of
-        (indCol, LayoutIndent) | tokCol < indCol ->
-          uncurry k1 $ collapse lexPos lexStack lexAcc
+        (indCol, LayoutIndent _) | tokCol < indCol ->
+          uncurry k1 $ collapse tokCol lexPos lexStack lexAcc
         _ -> k1 lexStack lexAcc
 
       k1 :: LayoutStack -> DList SourceToken -> m LexerResult
       k1 lexStack' lexAcc' = case (head lexStack', closesLayout lexTok) of
-        ((indCol, LayoutIndent), Nothing)
-          | Just LayoutIndent <- mbLytStart, nextTokCol == indCol ->
+        ((indCol, LayoutIndent _), [])
+          | Just (LayoutIndent _) <- mbLytStart, nextTokCol == indCol ->
               k2 (tail lexStack') $ lexAcc' `snoc` layoutToken lexPos TokLayoutEnd
           | tokCol == indCol && not lytStarted ->
               k2 lexStack' $ lexAcc' `snoc` layoutToken lexPos TokLayoutSep
-        ((indCol, LayoutIndent), Just LayoutIndent)
-          | indCol > 0 ->
-              k2 (tail lexStack') $ lexAcc' `snoc` layoutToken lexPos TokLayoutEnd
-          | otherwise ->
-              k2 lexStack' lexAcc'
-        ((0, delim), Just delim') | delim' == delim ->
+        ((_, LayoutIndent la), cs) | LayoutIndent la `elem` cs ->
+            k2 (tail lexStack') $ lexAcc' `snoc` layoutToken lexPos TokLayoutEnd
+        ((_, LayoutIndent _), [delim'])
+          | ((0, delim) : lexStack'', lexAcc'') <- collapse 1 lexPos lexStack' lexAcc'
+          , delim' == delim ->
+              k2 lexStack'' lexAcc''
+        ((0, delim), [delim']) | delim' == delim ->
           k2 (tail lexStack') $ lexAcc'
-        (_, Nothing) ->
+        (_, _) ->
           k2 lexStack' lexAcc'
-        _ -> fail $ "Mismatched delimiters or indentation"
 
       k2 :: LayoutStack -> DList SourceToken -> m LexerResult
       k2 lexStack' lexAcc' =
@@ -129,8 +138,8 @@ tokens = do
 
       k3 :: LayoutStack -> DList SourceToken -> m LexerResult
       k3 lexStack' lexAcc' = case mbLytStart of
-        Just LayoutIndent ->
-          k4 ((srcColumn lexPos', LayoutIndent) : lexStack') $
+        Just (LayoutIndent la) ->
+          k4 ((srcColumn lexPos', LayoutIndent la) : lexStack') $
             lexAcc' `snoc` layoutToken lexPos' TokLayoutStart
         Just delim ->
           k4 ((0, delim) : lexStack') lexAcc'
@@ -142,19 +151,24 @@ tokens = do
         Nothing -> do
           let result = DList.toList $ unwind lexPos' lexStack' lexAcc'
           pure (result, leading)
-        Just lexTok' ->
-          loop (mbLytStart == Just LayoutIndent) $
+        Just lexTok' -> do
+          let
+            starting = case mbLytStart of
+              Just (LayoutIndent _) -> True
+              _ -> False
+          loop starting $
             LexerState lexAcc' leading lexTok' lexPos' lexStack'
     k0
 
   collapse
-    :: SourcePos
+    :: Int
+    -> SourcePos
     -> LayoutStack
     -> DList SourceToken
     -> (LayoutStack, DList SourceToken)
-  collapse tokPos@(SourcePos _ tokCol) = go
+  collapse tokCol tokPos = go
     where
-    go ((indCol, LayoutIndent) : stack) acc
+    go ((indCol, LayoutIndent _) : stack) acc
       | tokCol < indCol = go stack $ acc `snoc` layoutToken tokPos TokLayoutEnd
     go stack acc = (stack, acc)
 
@@ -165,7 +179,7 @@ tokens = do
     -> DList SourceToken
   unwind tokPos = go
     where
-    go ((indCol, LayoutIndent) : stack) acc
+    go ((indCol, LayoutIndent _) : stack) acc
       | indCol > 0 = go stack $ acc `snoc` layoutToken tokPos TokLayoutEnd
     go _ acc = acc
 
@@ -186,7 +200,7 @@ line = CRLF <$ P.crlf <|> LF <$ P.newline
 
 lineComment :: Lexer e m => m Text
 lineComment = do
-  pre <- P.try $ P.chunk "--" <* P.notFollowedBy symbolChar
+  pre <- P.chunk "--"
   (pre <>) . Text.pack <$> P.manyTill P.anySingle (P.lookAhead line)
 
 blockComment :: Lexer e m => m Text
