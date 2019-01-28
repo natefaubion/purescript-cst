@@ -299,11 +299,19 @@ expr3 :: { Expr () }
 expr4 :: { Expr () }
   : expr5 { $1 }
   | 'if' expr 'then' expr 'else' expr { ExprIf () (IfThenElse $1 $2 $3 $4 $5 $6) }
-  | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
   | 'do' '\{' manySep(doStatement, '\;') '\}' { ExprDo () (DoBlock $1 $3) }
   | 'ado' '\{' manySep(doStatement, '\;') '\}' 'in' expr { ExprAdo () (AdoBlock $1 $3 $5 $6) }
   | 'lambda' expr0 '->' expr { ExprLambda () (Lambda $1 (toBinders $2) $3 $4) }
   | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
+  | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
+  -- These special cases handle some idiosynchratic syntax that the current
+  -- parse allows. Technically the parser allows the rhs of a case branch to
+  -- be at any level, but this is ambiguous. We allow it in the case of a
+  -- singleton case, since this is used in the wild.
+  | 'case' sep(expr, ',') 'of' '\{' sep(expr0, ',') '->' '\}' exprWhere
+      { ExprCase () (CaseOf $1 $2 $3 [(fmap toBinder $5, Unconditional $6 $8)]) }
+  | 'case' sep(expr, ',') 'of' '\{' sep(expr0, ',') '\}' guarded('->')
+      { ExprCase () (CaseOf $1 $2 $3 [(fmap toBinder $5, $7)]) }
 
 expr5 :: { Expr () }
   : exprAtom { $1 }
