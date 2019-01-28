@@ -19,6 +19,7 @@ import Language.PureScript.CST.Utils
 %name parseExpr expr
 %name parseModule module
 %tokentype { SourceToken }
+%monad { Parser }
 %errorhandlertype explist
 %error { parseError }
 
@@ -135,18 +136,18 @@ ident :: { Ident }
   | 'kind' { toIdent $1 }
 
 var :: { Ident }
-  : IDENT { toVar $1 }
-  | 'as' { toVar $1 }
-  | 'kind' { toVar $1 }
+  : IDENT {% toVar $1 }
+  | 'as' {% toVar $1 }
+  | 'kind' {% toVar $1 }
 
 symbol :: { Ident }
-  : SYMBOL { toSymbol $1 }
-  | '<=' { toSymbol $1 }
-  | '-' { toSymbol $1 }
-  | '@' { toSymbol $1 }
-  | '#' { toSymbol $1 }
-  | ':' { toSymbol $1 }
-  | '..' { toSymbol $1 }
+  : SYMBOL {% toSymbol $1 }
+  | '<=' {% toSymbol $1 }
+  | '-' {% toSymbol $1 }
+  | '@' {% toSymbol $1 }
+  | '#' {% toSymbol $1 }
+  | ':' {% toSymbol $1 }
+  | '..' {% toSymbol $1 }
 
 label :: { Ident }
   : IDENT { toLabel $1 }
@@ -301,7 +302,7 @@ expr4 :: { Expr () }
   | 'if' expr 'then' expr 'else' expr { ExprIf () (IfThenElse $1 $2 $3 $4 $5 $6) }
   | 'do' '\{' manySep(doStatement, '\;') '\}' { ExprDo () (DoBlock $1 $3) }
   | 'ado' '\{' manySep(doStatement, '\;') '\}' 'in' expr { ExprAdo () (AdoBlock $1 $3 $5 $6) }
-  | 'lambda' expr0 '->' expr { ExprLambda () (Lambda $1 (toBinders $2) $3 $4) }
+  | 'lambda' expr0 '->' expr {% do bs <- toBinders $2; pure $ ExprLambda () (Lambda $1 bs $3 $4) }
   | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
   | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
   -- These special cases handle some idiosynchratic syntax that the current
@@ -309,18 +310,18 @@ expr4 :: { Expr () }
   -- be at any level, but this is ambiguous. We allow it in the case of a
   -- singleton case, since this is used in the wild.
   | 'case' sep(expr, ',') 'of' '\{' sep(expr0, ',') '->' '\}' exprWhere
-      { ExprCase () (CaseOf $1 $2 $3 [(fmap toBinder $5, Unconditional $6 $8)]) }
+      {% do bs <- traverse toBinder $5; pure $ ExprCase () (CaseOf $1 $2 $3 [(bs, Unconditional $6 $8)]) }
   | 'case' sep(expr, ',') 'of' '\{' sep(expr0, ',') '\}' guarded('->')
-      { ExprCase () (CaseOf $1 $2 $3 [(fmap toBinder $5, $7)]) }
+      {% do bs <- traverse toBinder $5; pure $ ExprCase () (CaseOf $1 $2 $3 [(bs, $7)]) }
 
 expr5 :: { Expr () }
   : exprAtom { $1 }
   | exprAtom '.' sep(label, '.') { ExprRecordAccessor () (RecordAccessor $1 $2 $3) }
   | expr5 '{' '}' { ExprApp () $1 (ExprRecord () (Wrapped $2 Nothing $3)) }
   | expr5 '{' sep(recordUpdateOrLabel, ',') '}'
-      { case toRecordFields $3 of
-          Left xs -> ExprApp () $1 (ExprRecord () (Wrapped $2 (Just xs) $4))
-          Right xs -> ExprRecordUpdate () $1 (Wrapped $2 xs $4)
+      {% toRecordFields $3 >>= \case
+          Left xs -> pure $ ExprApp () $1 (ExprRecord () (Wrapped $2 (Just xs) $4))
+          Right xs -> pure $ ExprRecordUpdate () $1 (Wrapped $2 xs $4)
       }
 
 exprAtom :: { Expr () }
@@ -344,11 +345,11 @@ record :: { Delimited (RecordLabeled (Expr ())) }
   : delim('{', recordLabel, ',', '}') { $1 }
 
 recordLabel :: { RecordLabeled (Expr ()) }
-  : expr { toRecordLabeled $1 }
+  : expr {% toRecordLabeled $1 }
 
 recordUpdateOrLabel :: { Either (RecordLabeled (Expr ())) (RecordUpdate ()) }
   : label ':' expr { Left (RecordField $1 $2 $3) }
-  | label { Left (RecordPun (labelToVar $1)) }
+  | label {% fmap (Left . RecordPun) (labelToVar $1) }
   | label '=' expr { Right (RecordUpdateLeaf $1 $2 $3) }
   | label '{' sep(recordUpdate, ',') '}' { Right (RecordUpdateBranch $1 (Wrapped $2 $3 $4)) }
 
@@ -358,20 +359,10 @@ recordUpdate :: { RecordUpdate () }
 
 letBinding :: { LetBinding () }
   : var '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
-  | expr0 guarded('=')
-      { case toDeclOrBinder $1 of
-          Left (ann, ident, binders) ->
-            LetBindingName ann (ValueBindingFields ident binders $2)
-          Right binder ->
-            case $2 of
-              Unconditional tok expr ->
-                LetBindingPattern () binder tok expr
-              Guarded _ ->
-                internalError "Unexpected guard in let binding"
-      }
+  | expr0 guarded('=') {% toLetBinding $1 $2 }
 
 caseBranch :: { (Separated (Binder ()), Guarded ()) }
-  : sep(expr0, ',') guarded('->') { (fmap toBinder $1, $2) }
+  : sep(expr0, ',') guarded('->') {% do bs <- traverse toBinder $1; pure (bs, $2) }
 
 guarded(a) :: { Guarded () }
   : a exprWhere { Unconditional $1 $2 }
@@ -382,29 +373,26 @@ guardedExpr(a) :: { GuardedExpr () }
 
 patternGuard :: { PatternGuard () }
   : expr0 { PatternGuard Nothing $1 }
-  | expr '<-' expr0 { PatternGuard (Just (toBinder $1, $2)) $3 }
+  | expr '<-' expr0 {% do b <- toBinder $1; pure $ PatternGuard (Just (b, $2)) $3 }
 
 doStatement :: { DoStatement () }
   : 'let' '\{' manySep(letBinding, '\;') '\}' { DoLet $1 $3 }
   | expr { DoDiscard $1 }
-  | expr '<-' expr { DoBind (toBinder $1) $2 $3 }
+  | expr '<-' expr {% do b <- toBinder $1; pure $ DoBind b $2 $3 }
 
 module :: { Module () }
-  : 'module' properIdent exports 'where' '\{' moduleDecls
+  : 'module' properIdent exports 'where' '\{' moduleDecls '\}'
       { uncurry (Module () $1 $2 $3 $4) $6 }
 
 moduleDecls :: { ([ImportDecl ()], [Declaration ()]) }
-  : manyOrEmpty(moduleDecl) { toModuleDecls $1 }
+  : manySep(moduleDecl, '\;') {% toModuleDecls $1 }
+  | {- empty -} { ([], []) }
 
 moduleDecl :: { TmpModuleDecl a }
-  : importDecl modSep { TmpImport $1 }
-  | decl modSep { TmpDecl $1 }
-  | 'else' '\;' decl modSep { TmpChain $1 $3 }
-  | 'else' decl modSep { TmpChain $1 $2 }
-
-modSep
-  : '\;' { $1 }
-  | '\}' { $1 }
+  : importDecl { TmpImport $1 }
+  | decl { TmpDecl $1 }
+  | 'else' '\;' decl { TmpChain $1 $3 }
+  | 'else' decl { TmpChain $1 $2 }
 
 exports :: { Maybe (DelimitedNonEmpty (Export ())) }
   : {- empty -} { Nothing }
@@ -458,9 +446,9 @@ decl :: { Declaration () }
   | 'derive' 'newtype' instHead { DeclDerive () $1 (Just $2) $3 }
   | ident '::' type { DeclSignature () (Labeled $1 $2 $3) }
   | expr0 guarded('=')
-      { case toDecl $1 of
+      {% toDecl $1 >>= \case
           (ann, ident, binders) ->
-            DeclValue ann (ValueBindingFields ident binders $2)
+            pure $ DeclValue ann (ValueBindingFields ident binders $2)
       }
   | fixity { DeclFixity () $1 }
   | 'foreign' 'import' foreign { DeclForeign () $1 $2 $3 }
@@ -521,9 +509,9 @@ constraint :: { Type () }
 instBinding :: { InstanceBinding () }
   : ident '::' type { InstanceBindingSignature () (Labeled $1 $2 $3) }
   | expr0 guarded('=')
-      { case toDecl $1 of
+      {% toDecl $1 >>= \case
           (ann, ident, binders) ->
-            InstanceBindingName ann (ValueBindingFields ident binders $2)
+            pure $ InstanceBindingName ann (ValueBindingFields ident binders $2)
       }
 
 fixity :: { FixityFields () }
