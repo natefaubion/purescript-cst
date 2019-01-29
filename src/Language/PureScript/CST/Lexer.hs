@@ -40,6 +40,7 @@ data LayoutTerm
   | LayoutWhere
   | LayoutOf
   | LayoutDo
+  | LayoutAdo
   | LayoutRoot
   deriving (Show, Eq)
 
@@ -63,6 +64,7 @@ hasLayout = \case
   TokLowerName [] "where" -> Just (LayoutIndent LayoutWhere)
   TokLowerName [] "of" -> Just (LayoutIndent LayoutOf)
   TokLowerName _ "do" -> Just (LayoutIndent LayoutDo)
+  TokLowerName _ "ado" -> Just (LayoutIndent LayoutAdo)
   _ -> Nothing
 
 closesLayout :: Token -> [LayoutDelim]
@@ -70,7 +72,7 @@ closesLayout = \case
   TokRightParen -> [LayoutParen]
   TokRightBrace -> [LayoutBrace]
   TokRightSquare -> [LayoutSquare]
-  TokLowerName [] "in" -> [LayoutIndent LayoutLet]
+  TokLowerName [] "in" -> [LayoutIndent LayoutLet, LayoutIndent LayoutAdo]
   TokLowerName [] "where" -> [LayoutIndent LayoutOf, LayoutIndent LayoutDo]
   _ -> []
 

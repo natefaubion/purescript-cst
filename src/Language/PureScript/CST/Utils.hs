@@ -2,6 +2,7 @@ module Language.PureScript.CST.Utils where
 
 import Prelude
 
+import Data.Foldable (for_)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -128,14 +129,22 @@ toBoolean tok = case tok of
 toBinders :: forall a. Monoid a => Expr a -> Parser [Binder a]
 toBinders = convert []
   where
+  convert :: [Binder a] -> Expr a -> Parser [Binder a]
   convert acc = \case
-    ExprSection a tok -> pure $ BinderWildcard a tok : acc
-    ExprIdent a ident@(Ident _ [] _) -> pure $ BinderVar a ident : acc
-    ExprConstructor a ident -> pure $ BinderConstructor a ident [] : acc
-    ExprBoolean a tok val -> pure $ BinderBoolean a tok val : acc
-    ExprChar a tok val -> pure $ BinderChar a tok val : acc
-    ExprString a tok val -> pure $ BinderString a tok val : acc
-    ExprNumber a tok val -> pure $ BinderNumber a Nothing tok val : acc
+    ExprSection a tok ->
+      pure $ BinderWildcard a tok : acc
+    ExprIdent a ident@(Ident _ [] _) ->
+      pure $ BinderVar a ident : acc
+    ExprConstructor a ident ->
+      pure $ BinderConstructor a ident [] : acc
+    ExprBoolean a tok val ->
+      pure $ BinderBoolean a tok val : acc
+    ExprChar a tok val ->
+      pure $ BinderChar a tok val : acc
+    ExprString a tok val ->
+      pure $ BinderString a tok val : acc
+    ExprNumber a tok val ->
+      pure $ BinderNumber a Nothing tok val : acc
     ExprArray a del -> do
       del' <- traverse (traverse (traverse toBinder)) del
       pure $ BinderArray a del' : acc
@@ -148,13 +157,20 @@ toBinders = convert []
     ExprTyped a expr tok ty -> do
       expr' <- toBinder expr
       pure $ BinderTyped a expr' tok ty : acc
-    ExprOp a lhs (Ident op [] "@") rhs ->
-      case splitNamed lhs of
-        (lhs', ExprIdent a' ident@(Ident _ [] _)) -> do
+    ExprOp a lhs op@(Ident tok [] "@") rhs ->
+      case lhs of
+        ExprIdent a' ident -> do
           rhs' <- toBinder rhs
-          let acc' = BinderNamed (a <> a') ident op rhs' : acc
-          maybe (pure acc') (convert acc') lhs'
-        (_, expr) -> parseFail (exprToken expr) "Expected pattern, saw expression"
+          pure $ BinderNamed (a <> a') ident tok rhs' : acc
+        ExprApp a' lhs' (ExprIdent a'' ident) -> do
+          rhs' <- toBinder rhs
+          convert (BinderNamed (a <> a' <> a'') ident tok rhs' : acc) lhs'
+        ExprOp a' lhs' op' (ExprIdent a'' ident) -> do
+          convert acc $ ExprOp a' lhs' op' (ExprOp a (ExprIdent a'' ident) op rhs)
+        ExprOp a' lhs' op' (ExprApp a'' rhs'' (ExprIdent a''' ident)) -> do
+          rhs' <- toBinder rhs
+          convert (BinderNamed (a <> a'' <> a''') ident tok rhs' : acc) $ ExprOp a' lhs' op' rhs''
+        _ -> parseFail (exprToken lhs) "Expected pattern, saw expression"
     ExprOp a lhs op rhs -> do
       lhs' <- toBinder lhs
       rhs' <- toBinder rhs
@@ -164,14 +180,16 @@ toBinders = convert []
       convert (rhs' : acc) lhs
     expr -> parseFail (exprToken expr) "Expected pattern, saw expression"
 
-  splitNamed :: Expr a -> (Maybe (Expr a), Expr a)
-  splitNamed = \case
-    ExprOp a lhs op@(Ident _ [] "@") (ExprApp a' lhs' rhs) ->
-      (Just (ExprOp (a <> a') lhs op lhs'), rhs)
-    ExprApp _ lhs rhs ->
-      (Just lhs, rhs)
-    expr ->
-      (Nothing, expr)
+toBinderAtoms :: forall a. Monoid a => Expr a -> Parser [Binder a]
+toBinderAtoms expr = do
+  bs <- toBinders expr
+  for_ bs $ \b -> do
+    let err = parseFail (binderToken b) "Expected pattern, saw expression"
+    case b of
+      BinderOp {} -> err
+      BinderTyped {} -> err
+      _ -> pure ()
+  pure bs
 
 toBinder :: forall a. Monoid a => Expr a -> Parser (Binder a)
 toBinder expr = do
