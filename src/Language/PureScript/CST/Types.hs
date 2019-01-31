@@ -63,6 +63,7 @@ data Token
   | TokLayoutStart
   | TokLayoutSep
   | TokLayoutEnd
+  | TokEof
   deriving (Show, Eq, Ord, Generic)
 
 type SourceToken = (TokenAnn, Token)
@@ -142,6 +143,7 @@ data Module a = Module
   , modWhere :: SourceToken
   , modImports :: [ImportDecl a]
   , modDecls :: [Declaration a]
+  , modTrailingComments :: [Comment LineFeed]
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Export a
@@ -187,7 +189,7 @@ data ImportDecl a = ImportDecl
   , impKeyword :: SourceToken
   , impModule :: Ident
   , impNames :: Maybe (Maybe SourceToken, DelimitedNonEmpty (Import a))
-  , impQualification :: Maybe (SourceToken, Ident)
+  , impQual :: Maybe (SourceToken, Ident)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Import a

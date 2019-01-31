@@ -4,12 +4,15 @@ module Language.PureScript.CST.Parser
   , parseKind
   , parseExpr
   , parseModule
+  , parse
   ) where
 
 import Prelude
 
 import Data.Foldable (foldl')
 import Data.Text (Text)
+import Language.PureScript.CST.Lexer
+import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Types
 import Language.PureScript.CST.Utils
 }
@@ -22,6 +25,7 @@ import Language.PureScript.CST.Utils
 %monad { Parser }
 %errorhandlertype explist
 %error { parseError }
+%lexer { lexer } { (_, TokEof) }
 
 %token
   '('             { (_, TokLeftParen) }
@@ -382,7 +386,7 @@ doStatement :: { DoStatement () }
 
 module :: { Module () }
   : 'module' properIdent exports 'where' '\{' moduleDecls '\}'
-      { uncurry (Module () $1 $2 $3 $4) $6 }
+      {% fmap (uncurry (Module () $1 $2 $3 $4) $6) getLeadingComments }
 
 moduleDecls :: { ([ImportDecl ()], [Declaration ()]) }
   : manySep(moduleDecl, '\;') {% toModuleDecls $1 }
@@ -528,3 +532,13 @@ foreign :: { Foreign () }
   : ident '::' type { ForeignValue (Labeled $1 $2 $3) }
   | 'data' properIdent '::' kind { ForeignData $1 (Labeled $2 $3 $4) }
   | 'kind' properIdent { ForeignKind $1 $2 }
+
+{
+
+lexer :: (SourceToken -> Parser a) -> Parser a
+lexer k = munch >>= k
+
+parse :: Text -> Either ParserError (Module ())
+parse src = runParser (initialParserState src) parseModule
+
+}

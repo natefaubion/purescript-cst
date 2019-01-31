@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 0d0ffef01306dea5cea3ba89cd5858c5ad46a0da81d324d0f969bd74970306df
+-- hash: e6a9a9777f8bd49a0ade45338b2907616781736884f849a7edc729963132ab34
 
 name:           purescript-cst
 version:        0.1.0.0
@@ -24,8 +24,13 @@ source-repository head
 
 library
   exposed-modules:
+      Language.PureScript.CST
+      Language.PureScript.CST.Layout
       Language.PureScript.CST.Lexer
+      Language.PureScript.CST.Monad
       Language.PureScript.CST.Parser
+      Language.PureScript.CST.Positions
+      Language.PureScript.CST.Print
       Language.PureScript.CST.Types
       Language.PureScript.CST.Utils
   other-modules:

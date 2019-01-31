@@ -6,46 +6,8 @@ import Data.Foldable (for_)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Types
-
-data ParserError = ParserError
-  { errTok :: [SourceToken]
-  , errAlts :: [String]
-  , errMsg :: String
-  }
-
-newtype Parser a =
-  Parser (forall r. (ParserError -> r) -> (a -> r) -> r)
-
-instance Functor Parser where
-  fmap f (Parser k) =
-    Parser $ \kerr ksucc ->
-      k kerr (ksucc . f)
-
-instance Applicative Parser where
-  pure = return
-  fa <*> fb = do
-    f <- fa
-    b <- fb
-    return (f b)
-
-instance Monad Parser where
-  return a = Parser $ \_ k -> k a
-  Parser k1 >>= k2 =
-    Parser $ \kerr ksucc ->
-      k1 kerr $ \a ->
-        case k2 a of
-          Parser k3 ->
-            k3 kerr ksucc
-
-runParser :: Parser a -> Either ParserError a
-runParser (Parser k) = k Left Right
-
-parseError :: ([SourceToken], [String]) -> Parser a
-parseError (toks, alts) = Parser $ \kerr _ -> kerr $ ParserError toks alts "Unexpected token"
-
-parseFail :: SourceToken -> String -> Parser a
-parseFail tok msg = Parser $ \kerr _ -> kerr $ ParserError [tok] [] msg
 
 placeholder :: SourceToken
 placeholder =
@@ -160,24 +122,24 @@ toBinders = convert []
     ExprOp a lhs op@(Ident tok [] "@") rhs ->
       case lhs of
         ExprIdent a' ident -> do
-          rhs' <- toBinder rhs
-          pure $ BinderNamed (a <> a') ident tok rhs' : acc
+          rhs' <- toBinders rhs
+          pure $ BinderNamed (a <> a') ident tok (head rhs') : tail rhs' <> acc
         ExprApp a' lhs' (ExprIdent a'' ident) -> do
-          rhs' <- toBinder rhs
-          convert (BinderNamed (a <> a' <> a'') ident tok rhs' : acc) lhs'
+          rhs' <- toBinders rhs
+          convert (BinderNamed (a <> a' <> a'') ident tok (head rhs') : tail rhs' <> acc) lhs'
         ExprOp a' lhs' op' (ExprIdent a'' ident) -> do
           convert acc $ ExprOp a' lhs' op' (ExprOp a (ExprIdent a'' ident) op rhs)
         ExprOp a' lhs' op' (ExprApp a'' rhs'' (ExprIdent a''' ident)) -> do
-          rhs' <- toBinder rhs
-          convert (BinderNamed (a <> a'' <> a''') ident tok rhs' : acc) $ ExprOp a' lhs' op' rhs''
+          rhs' <- toBinders rhs
+          convert (BinderNamed (a <> a'' <> a''') ident tok (head rhs') : tail rhs' <> acc) $ ExprOp a' lhs' op' rhs''
         _ -> parseFail (exprToken lhs) "Expected pattern, saw expression"
     ExprOp a lhs op rhs -> do
       lhs' <- toBinder lhs
       rhs' <- toBinder rhs
       pure $ BinderOp a lhs' op rhs' : acc
     ExprApp _ lhs rhs -> do
-      rhs' <- toBinder rhs
-      convert (rhs' : acc) lhs
+      rhs' <- toBinders rhs
+      convert (rhs' <> acc) lhs
     expr -> parseFail (exprToken expr) "Expected pattern, saw expression"
 
 toBinderAtoms :: forall a. Monoid a => Expr a -> Parser [Binder a]
@@ -196,6 +158,8 @@ toBinder expr = do
   bs <- toBinders expr
   case bs of
     BinderConstructor a ident [] : args -> pure $ BinderConstructor a ident args
+    BinderNamed a ident tok (BinderConstructor a' ctr []) : args ->
+      pure $ BinderNamed a ident tok $ BinderConstructor a' ctr args
     a : [] -> pure a
     a : _ -> parseFail (binderToken a) "Expected pattern, saw expression"
     [] -> internalError "Empty binder set"
