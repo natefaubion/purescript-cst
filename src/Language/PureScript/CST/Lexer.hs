@@ -272,7 +272,7 @@ rawStringLiteral = delimiter *> go mempty
   go acc = do
     chs <- P.takeWhileP Nothing (\c -> c /= '"')
     let acc' = acc <> chs
-    (delimiter *> pure acc)
+    (delimiter *> pure acc')
       <|> (go . (acc' <>) =<< P.takeP Nothing 3)
 
 intLiteral :: Lexer e m => m (Text, Integer)
