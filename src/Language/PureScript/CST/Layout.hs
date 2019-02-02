@@ -56,6 +56,7 @@ lytToken pos = (ann,)
 
 insertLayout :: SourceToken -> SourcePos -> LayoutStack -> (LayoutStack, [SourceToken])
 insertLayout src@(tokAnn, tok) nextPos stack =
+  -- Insert TokLayoutEnds if the column is less than the current indent
   k1 $ collapse ((srcColumn tokPos <) . srcColumn) stack mempty
   where
   tokPos = srcStart $ tokRange tokAnn
@@ -64,28 +65,41 @@ insertLayout src@(tokAnn, tok) nextPos stack =
 
   k1 (stk, acc) = case (head stk, endLyt) of
     ((lytPos, LytIndent _), [])
+      -- If this token starts a new layout, and the new layout column is
+      -- the same as the current layout column, close the current layout.
       | Just (LytIndent _) <- hasLyt, srcColumn nextPos == srcColumn lytPos ->
           k2 (tail stk) $ acc `snoc` lytToken tokPos TokLayoutEnd
+      -- If the column is the same as the current indent, but not the column,
+      -- insert a separator. If the line is also the same, that means it's the
+      -- first token in the layout, so a separator is unnecessary.
       | srcColumn tokPos == srcColumn lytPos && srcLine tokPos /= srcLine lytPos ->
           k2 stk $ acc `snoc` lytToken tokPos TokLayoutSep
+    -- If the current token closes the current layout context, insert TokLayoutEnd.
     ((_, LytIndent la), cs) | LytIndent la `elem` cs ->
       k2 (tail stk) $ acc `snoc` lytToken tokPos TokLayoutEnd
+    -- If we have a closing delimiter and are in a layout context, we need to
+    -- insert TokLayoutEnds.
     ((_, LytIndent _), [delim'])
       | ((_, delim) : stk', acc') <- collapse (const True) stk acc
       , delim' == delim ->
           k2 stk' acc'
+    -- Pop a matched closing delimiter
     ((_, delim), [delim']) | delim' == delim ->
       k2 (tail stk) acc
     (_, _) ->
       k2 stk acc
 
+  -- Insert the current token
   k2 stk acc =
     k3 stk $ acc `snoc` src
 
   k3 stk acc = case hasLyt of
+    -- If the token starts layout, we need to push a new layout context with
+    -- the next token's position.
     Just (LytIndent la) ->
       k4 ((nextPos, LytIndent la) : stk) $
         acc `snoc` lytToken nextPos TokLayoutStart
+    -- Push a new delimiter context.
     Just delim ->
       k4 ((tokPos, delim) : stk) acc
     Nothing ->

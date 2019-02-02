@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeApplications #-}
 module Language.PureScript.CST.Lexer where
 
 import Prelude
