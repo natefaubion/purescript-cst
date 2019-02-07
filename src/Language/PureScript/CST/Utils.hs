@@ -2,10 +2,10 @@ module Language.PureScript.CST.Utils where
 
 import Prelude
 
-import Data.Foldable (for_)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import Data.Traversable (for)
 import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Types
 
@@ -14,6 +14,24 @@ placeholder =
   ( TokenAnn (SourceRange (SourcePos 0 0) (SourcePos 0 0)) [] []
   , TokLowerName [] "<placeholder>"
   )
+
+unexpected :: SourceToken -> Ident
+unexpected tok = Ident tok [] "<unexpected>"
+
+unexpectedExpr :: Monoid a => [SourceToken] -> Expr a
+unexpectedExpr toks = ExprIdent mempty (unexpected (head toks))
+
+unexpectedDecl :: Monoid a => [SourceToken] -> Declaration a
+unexpectedDecl toks = DeclValue mempty (ValueBindingFields (unexpected (head toks)) [] (Guarded []))
+
+unexpectedBinder :: Monoid a => [SourceToken] -> Binder a
+unexpectedBinder toks = BinderVar mempty (unexpected (head toks))
+
+unexpectedLetBinding :: Monoid a => [SourceToken] -> LetBinding a
+unexpectedLetBinding toks = LetBindingName mempty (ValueBindingFields (unexpected (head toks)) [] (Guarded []))
+
+unexpectedInstBinding :: Monoid a => [SourceToken] -> InstanceBinding a
+unexpectedInstBinding toks = InstanceBindingName mempty (ValueBindingFields (unexpected (head toks)) [] (Guarded []))
 
 separated :: [(SourceToken, a)] -> Separated a
 separated = go []
@@ -40,14 +58,14 @@ toVar :: SourceToken -> Parser Ident
 toVar tok = case tok of
   (_, TokLowerName q a)
     | not (Set.member a reservedNames) -> pure $ Ident tok q a
-    | otherwise -> parseFail tok "Expected variable, saw keyword"
+    | otherwise -> parseFail tok ErrKeywordVar
   _ -> internalError $ "Invalid variable token: " <> show tok
 
 toSymbol :: SourceToken -> Parser Ident
 toSymbol tok = case tok of
   (_, TokSymbol q a)
     | not (Set.member a reservedSymbols) -> pure $ Ident tok q a
-    | otherwise -> parseFail tok "Expected symbol, saw reserved symbol"
+    | otherwise -> parseFail tok ErrKeywordSymbol
   _ -> internalError $ "Invalid operator token: " <> show tok
 
 toLabel :: SourceToken -> Ident
@@ -132,7 +150,7 @@ toBinders = convert []
         ExprOp a' lhs' op' (ExprApp a'' rhs'' (ExprIdent a''' ident)) -> do
           rhs' <- toBinders rhs
           convert (BinderNamed (a <> a'' <> a''') ident tok (head rhs') : tail rhs' <> acc) $ ExprOp a' lhs' op' rhs''
-        _ -> parseFail (exprToken lhs) "Expected pattern, saw expression"
+        _ -> parseFail (exprToken lhs) ErrExprInBinder
     ExprOp a lhs op rhs -> do
       lhs' <- toBinder lhs
       rhs' <- toBinder rhs
@@ -140,18 +158,21 @@ toBinders = convert []
     ExprApp _ lhs rhs -> do
       rhs' <- toBinders rhs
       convert (rhs' <> acc) lhs
-    expr -> parseFail (exprToken expr) "Expected pattern, saw expression"
+    expr -> parseFail (exprToken expr) ErrExprInBinder
 
 toBinderAtoms :: forall a. Monoid a => Expr a -> Parser [Binder a]
 toBinderAtoms expr = do
   bs <- toBinders expr
-  for_ bs $ \b -> do
-    let err = parseFail (binderToken b) "Expected pattern, saw expression"
+  for bs $ \b -> do
+    let
+      err = do
+        let toks = [binderToken b]
+        addFailure toks ErrExprInBinder
+        pure $ unexpectedBinder toks
     case b of
       BinderOp {} -> err
       BinderTyped {} -> err
-      _ -> pure ()
-  pure bs
+      _ -> pure b
 
 toBinder :: forall a. Monoid a => Expr a -> Parser (Binder a)
 toBinder expr = do
@@ -161,7 +182,10 @@ toBinder expr = do
     BinderNamed a ident tok (BinderConstructor a' ctr []) : args ->
       pure $ BinderNamed a ident tok $ BinderConstructor a' ctr args
     a : [] -> pure a
-    a : _ -> parseFail (binderToken a) "Expected pattern, saw expression"
+    _ : _ -> do
+      let toks = binderToken <$> bs
+      addFailure toks ErrExprInBinder
+      pure $ unexpectedBinder toks
     [] -> internalError "Empty binder set"
 
 toDeclOrBinder :: forall a. Monoid a => Expr a -> Parser (Either (a, Ident, [Binder a]) (Binder a))
@@ -171,15 +195,28 @@ toDeclOrBinder expr = do
     BinderVar a ident : args -> pure $ Left (a, ident, args)
     BinderConstructor a ident [] : args -> pure $ Right $ BinderConstructor a ident args
     a : [] -> pure $ Right $ a
-    a : _ -> parseFail (binderToken a) "Expected pattern, saw expression"
+    _ : _ -> do
+      let toks = binderToken <$> bs
+      addFailure toks ErrExprInDeclOrBinder
+      pure $ Right $ unexpectedBinder toks
     [] -> internalError "Empty binder set"
 
-toDecl :: forall a. Monoid a => Expr a -> Parser (a, Ident, [Binder a])
-toDecl expr = do
+toDecl
+  :: forall a r
+   . Monoid a
+  => (a -> ValueBindingFields a -> r)
+  -> ([SourceToken] -> r)
+  -> Expr a
+  -> Guarded a
+  -> Parser r
+toDecl ksucc kerr expr guarded = do
   bs <- toBinders expr
   case bs of
-    BinderVar a ident : args -> pure (a, ident, args)
-    a : _ -> parseFail (binderToken a) "Expected declaration, saw pattern"
+    BinderVar a ident : args -> pure $ ksucc a (ValueBindingFields ident args guarded)
+    _ : _ -> do
+      let toks = (binderToken <$> bs)
+      addFailure toks ErrBinderInDecl
+      pure $ kerr toks
     [] -> internalError "Empty binder set"
 
 toRecordLabeled :: Expr a -> Parser (RecordLabeled (Expr a))
@@ -198,7 +235,7 @@ toRecordLabeled = go1
     ExprTyped a lhs tok rhs ->
       go2 (k . (\lhs' -> ExprTyped a lhs' tok rhs)) lhs
     expr ->
-      parseFail (exprToken expr) "Expected label, saw expression"
+      parseFail (exprToken expr) ErrExprInLabel
 
 toRecordFields
   :: Separated (Either (RecordLabeled (Expr a)) (RecordUpdate a))
@@ -210,11 +247,11 @@ toRecordFields = \case
     Right . Separated a <$> traverse (traverse unRight) as
   where
   unLeft (Left tok) = pure tok
-  unLeft (Right tok) = parseFail (updateToken tok) "Expected ':', saw update"
+  unLeft (Right tok) = parseFail (updateToken tok) ErrRecordUpdateInCtr
 
   unRight (Right tok) = pure tok
-  unRight (Left (RecordPun (Ident tok _ _))) = parseFail tok "Expected record update, saw pun"
-  unRight (Left (RecordField _ tok _)) = parseFail tok "Expected '=', saw ':'"
+  unRight (Left (RecordPun (Ident tok _ _))) = parseFail tok ErrRecordPunInUpdate
+  unRight (Left (RecordField _ tok _)) = parseFail tok ErrRecordCtrInUpdate
 
 data TmpModuleDecl a
   = TmpImport (ImportDecl a)
@@ -231,8 +268,8 @@ toModuleDecls = goImport []
   goDecl acc (TmpDecl x : xs) = goDecl (x : acc) xs
   goDecl (DeclInstanceChain a (Separated h t) : acc) (TmpChain tok (DeclInstanceChain a' (Separated h' t')) : xs) =
     goDecl (DeclInstanceChain (a <> a') (Separated h (t <> ((tok, h') : t'))) : acc) xs
-  goDecl _ (TmpChain tok _ : _) = parseFail tok "Expected top-level declaration, saw 'else'"
-  goDecl _ (TmpImport imp : _) = parseFail (impKeyword imp) "Expected top-level declaration, saw import"
+  goDecl _ (TmpChain tok _ : _) = parseFail tok ErrElseInDecl
+  goDecl _ (TmpImport imp : _) = parseFail (impKeyword imp) ErrImportInDecl
 
 varToType :: Monoid a => TypeVarBinding a -> Type a
 varToType (TypeVarKinded (Wrapped l (Labeled var tok kind) r)) =
@@ -254,7 +291,7 @@ toLetBinding lhs guarded = do
         Unconditional tok expr ->
           pure $ LetBindingPattern mempty binder tok expr
         Guarded (g : _) ->
-          parseFail (grdBar g) "Unexpected guard in let binding"
+          parseFail (grdBar g) ErrGuardInLetBinder
         Guarded _ ->
           internalError "Empty guard set"
 

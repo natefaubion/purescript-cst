@@ -328,7 +328,7 @@ data Lambda a = Lambda
 
 data IfThenElse a = IfThenElse
   { iteIf :: SourceToken
-  , iteHead :: Expr a
+  , iteCond :: Expr a
   , iteThen :: SourceToken
   , iteTrue :: Expr a
   , iteElse :: SourceToken

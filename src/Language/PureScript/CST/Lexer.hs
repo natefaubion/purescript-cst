@@ -32,6 +32,7 @@ initialParserState src =
         , parserPos = advanceLeading (SourcePos 1 1) parserLeading
         , parserLeading = parserLeading
         , parserStack = [(SourcePos 0 0, LytIndent LytRoot)]
+        , parserErrors = []
         }
     (parserNext, _) ->
       ParserState
@@ -40,6 +41,7 @@ initialParserState src =
         , parserPos = SourcePos 1 1
         , parserLeading = []
         , parserStack = [(SourcePos 0 0, LytIndent LytRoot)]
+        , parserErrors = []
         }
   where
   leadingP :: P.Parsec Void Text [Comment LineFeed]
@@ -58,7 +60,7 @@ initialParserState src =
         }
     }
 
-lex :: Text -> Either ParserError [SourceToken]
+lex :: Text -> Either [ParserError] [SourceToken]
 lex src = runParser (initialParserState src) (go mempty)
   where
   go acc = do
@@ -67,32 +69,50 @@ lex src = runParser (initialParserState src) (go mempty)
       TokEof -> pure $ DList.toList acc
       _      -> go (acc `snoc` tok)
 
+recover :: ParserErrorType -> ([SourceToken] -> a) -> (SourceToken -> Parser a)
+recover err k tok = do
+  stk <- getLayoutStack
+  let
+    p = case snd $ head stk of
+      LytParen    -> \(_, t) -> t == TokRightParen
+      LytBrace    -> \(_, t) -> t == TokRightBrace
+      LytSquare   -> \(_, t) -> t == TokRightSquare
+      LytIndent _ -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
+  toks <-
+    if p tok
+      then pushBack tok *> pure [tok]
+      else (tok :) <$> munchWhile (not . p)
+  addFailure toks err
+  pure $ k toks
+
+munchWhile :: (SourceToken -> Bool) -> Parser [SourceToken]
+munchWhile p = go mempty
+  where
+  go acc = do
+    tok <- munch
+    if p tok
+      then go (acc `snoc` tok)
+      else do
+        pushBack tok
+        pure $ DList.toList acc
+
 munch :: Parser SourceToken
-munch = Parser $ \(ParserState {..}) kerr ksucc ->
+munch = Parser $ \state@(ParserState {..}) kerr ksucc ->
   case parserBuff of
     tok : parserBuff' -> do
-      let
-        state = ParserState
-          { parserNext = parserNext
-          , parserBuff = parserBuff'
-          , parserPos = parserPos
-          , parserLeading = parserLeading
-          , parserStack = parserStack
-          }
-      ksucc state tok
+      let state' = state { parserBuff = parserBuff' }
+      ksucc state' tok
     _ ->
       case P.runParser' munchP parserNext of
         (parserNext', Right (TokEof, _)) -> do
           let
             toks = unwindLayout parserPos parserStack
-            state = ParserState
+            state' = state
               { parserNext = parserNext'
               , parserBuff = tail toks
-              , parserPos = parserPos
-              , parserLeading = parserLeading
               , parserStack = []
               }
-          ksucc state (head toks)
+          ksucc state' (head toks)
         (parserNext', Right (tok, (trailing, parserLeading'))) -> do
           let
             endPos = advanceToken parserPos tok
@@ -104,31 +124,29 @@ munch = Parser $ \(ParserState {..}) kerr ksucc ->
               }
             (parserStack', toks) =
               insertLayout (tokenAnn, tok) parserPos' parserStack
-            state = ParserState
+            state' = state
               { parserNext = parserNext'
               , parserBuff = tail toks
               , parserPos = parserPos'
               , parserLeading = parserLeading'
               , parserStack = parserStack'
               }
-          ksucc state (head toks)
-        (_, Left err) ->
-          kerr $ convertErr parserPos err
+          ksucc state' (head toks)
+        (_, Left err) -> do
+          let range = SourceRange parserPos (applyDelta parserPos (0, 1))
+          kerr state $ convertErr range parserStack err
   where
   munchP :: forall void. P.Parsec Void Text (Token, ([Comment void], [Comment LineFeed]))
   munchP =
     (,) <$> token <*> breakComments
         <|> (TokEof, ([], [])) <$ P.eof
 
-  convertErr pos bundle =
+  convertErr pos stk bundle =
     case NonEmpty.head $ P.bundleErrors bundle of
-      P.TrivialError _ (Just err) alts -> do
-        let err' = "Unexpected " <> printErrorItem err
-        ParserError pos Nothing (printErrorItem <$> Set.toList alts) err'
-      P.TrivialError _ _ alts ->
-        ParserError pos Nothing (printErrorItem <$> Set.toList alts) "Unexpected input"
+      P.TrivialError _ err alts -> do
+        ParserError pos [] stk $ ErrLexeme (printErrorItem <$> err) (printErrorItem <$> Set.toList alts)
       P.FancyError _ _ ->
-        ParserError pos Nothing [] "Unexpected input"
+        ParserError pos [] stk $ ErrEof
 
   printErrorItem = \case
     P.Tokens cs -> NonEmpty.toList cs
@@ -201,7 +219,7 @@ token = P.choice
   , P.label "hole" $ P.try $ TokHole <$> (P.char '?' *> lname)
   , P.label "identifier" identifier
   , P.label "character" $ uncurry TokChar <$> charLiteral
-  , P.label "raw string" $ TokRawString <$> rawStringLiteral
+  , P.try $ P.label "raw string" $ TokRawString <$> rawStringLiteral
   , P.label "string" $ uncurry TokString <$> stringLiteral
   , P.try $ P.label "number" $ uncurry TokNumber <$> numberLiteral
   , P.label "integer" $ uncurry TokInt <$> intLiteral

@@ -23,7 +23,6 @@ import Language.PureScript.CST.Utils
 %name parseModule module
 %tokentype { SourceToken }
 %monad { Parser }
-%errorhandlertype explist
 %error { parseError }
 %lexer { lexer } { (_, TokEof) }
 
@@ -341,6 +340,7 @@ exprAtom :: { Expr () }
   | record { ExprRecord () $1 }
   | '(' symbol ')' { ExprOpName () (Wrapped $1 $2 $3) }
   | '(' expr ')' { ExprParens () (Wrapped $1 $2 $3) }
+  | error {%% recover ErrExpr unexpectedExpr }
 
 array :: { Delimited (Expr ()) }
   : delim('[', expr, ',', ']') { $1 }
@@ -364,6 +364,7 @@ recordUpdate :: { RecordUpdate () }
 letBinding :: { LetBinding () }
   : var '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
   | expr0 guarded('=') {% toLetBinding $1 $2 }
+  | expr0 {%% recover ErrLetBinding (unexpectedLetBinding . (exprToken $1 :)) }
 
 caseBranch :: { (Separated (Binder ()), Guarded ()) }
   : sep(expr0, ',') guarded('->') {% do bs <- traverse toBinder $1; pure (bs, $2) }
@@ -449,13 +450,11 @@ decl :: { Declaration () }
   | 'derive' instHead { DeclDerive () $1 Nothing $2 }
   | 'derive' 'newtype' instHead { DeclDerive () $1 (Just $2) $3 }
   | ident '::' type { DeclSignature () (Labeled $1 $2 $3) }
-  | expr0 guarded('=')
-      {% toDecl $1 >>= \case
-          (ann, ident, binders) ->
-            pure $ DeclValue ann (ValueBindingFields ident binders $2)
-      }
+  | expr0 guarded('=') {% toDecl DeclValue unexpectedDecl $1 $2 }
   | fixity { DeclFixity () $1 }
   | 'foreign' 'import' foreign { DeclForeign () $1 $2 $3 }
+  | expr0 error {%% recover ErrExprInDecl (unexpectedDecl . (exprToken $1 :)) }
+  | error {%% recover ErrDecl unexpectedDecl }
 
 dataHead :: { DataHead () }
   : 'data' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
@@ -512,11 +511,7 @@ constraint :: { Type () }
 
 instBinding :: { InstanceBinding () }
   : ident '::' type { InstanceBindingSignature () (Labeled $1 $2 $3) }
-  | expr0 guarded('=')
-      {% toDecl $1 >>= \case
-          (ann, ident, binders) ->
-            pure $ InstanceBindingName ann (ValueBindingFields ident binders $2)
-      }
+  | expr0 guarded('=') {% toDecl InstanceBindingName unexpectedInstBinding $1 $2 }
 
 fixity :: { FixityFields () }
   : infix int var 'as' symbol { FixityFields $1 $2 Nothing $3 $4 $5 }
@@ -534,11 +529,9 @@ foreign :: { Foreign () }
   | 'kind' properIdent { ForeignKind $1 $2 }
 
 {
-
 lexer :: (SourceToken -> Parser a) -> Parser a
 lexer k = munch >>= k
 
-parse :: Text -> Either ParserError (Module ())
+parse :: Text -> Either [ParserError] (Module ())
 parse src = runParser (initialParserState src) parseModule
-
 }
