@@ -219,29 +219,6 @@ toDecl ksucc kerr expr guarded = do
       pure $ kerr toks
     [] -> internalError "Empty binder set"
 
-toRecordLabeled :: Expr a -> Parser (RecordLabeled (Expr a))
-toRecordLabeled = go1
-  where
-  go1 = \case
-    ExprIdent _ ident@(Ident _ [] _) ->
-      pure $ RecordPun ident
-    expr -> go2 id expr
-
-  go2 k = \case
-    ExprOp _ lhs (Ident tok [] ":") rhs
-      | ExprIdent _ ident@(Ident _ [] _) <- lhs ->
-          pure $ RecordField ident tok (k rhs)
-      | ExprBoolean _ lit _ <- lhs ->
-          pure $ RecordField (toLabel lit) tok (k rhs)
-      | ExprString _ lit _ <- lhs ->
-          pure $ RecordField (toLabel lit) tok (k rhs)
-    ExprOp a lhs ident rhs ->
-      go2 (k . (\lhs' -> ExprOp a lhs' ident rhs)) lhs
-    ExprTyped a lhs tok rhs ->
-      go2 (k . (\lhs' -> ExprTyped a lhs' tok rhs)) lhs
-    expr ->
-      parseFail (exprToken expr) ErrExprInLabel
-
 toRecordFields
   :: Separated (Either (RecordLabeled (Expr a)) (RecordUpdate a))
   -> Parser (Either (Separated (RecordLabeled (Expr a))) (Separated (RecordUpdate a)))
