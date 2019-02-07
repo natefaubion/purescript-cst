@@ -230,6 +230,8 @@ toRecordLabeled = go1
   go2 k = \case
     ExprOp _ (ExprIdent _ ident@(Ident _ [] _)) (Ident tok [] ":") rhs ->
       pure $ RecordField ident tok (k rhs)
+    ExprOp _ (ExprBoolean _ lit _) (Ident tok [] ":") rhs ->
+      pure $ RecordField (toIdent lit) tok (k rhs)
     ExprOp a lhs ident rhs ->
       go2 (k . (\lhs' -> ExprOp a lhs' ident rhs)) lhs
     ExprTyped a lhs tok rhs ->

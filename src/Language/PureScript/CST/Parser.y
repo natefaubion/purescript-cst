@@ -156,15 +156,20 @@ label :: { Ident }
   : IDENT { toLabel $1 }
   | LIT_STRING { toLabel $1 }
   | LIT_RAW_STRING { toLabel $1 }
-  | 'ado' { toLabel $1 }
   | 'as' { toLabel $1 }
+  | 'true' { toLabel $1 }
+  | 'false' { toLabel $1 }
+  | 'kind' { toLabel $1 }
+  | labelKeyword { $1 }
+
+labelKeyword :: { Ident }
+  : 'ado' { toLabel $1 }
   | 'case' { toLabel $1 }
   | 'class' { toLabel $1 }
   | 'data' { toLabel $1 }
   | 'derive' { toLabel $1 }
   | 'do' { toLabel $1 }
   | 'else' { toLabel $1 }
-  | 'false' { toLabel $1 }
   | 'forall' { toLabel $1 }
   | 'forallu' { toLabel $1 }
   | 'foreign' { toLabel $1 }
@@ -176,13 +181,11 @@ label :: { Ident }
   | 'infixl' { toLabel $1 }
   | 'infixr' { toLabel $1 }
   | 'instance' { toLabel $1 }
-  | 'kind' { toLabel $1 }
   | 'let' { toLabel $1 }
   | 'module' { toLabel $1 }
   | 'newtype' { toLabel $1 }
   | 'of' { toLabel $1 }
   | 'then' { toLabel $1 }
-  | 'true' { toLabel $1 }
   | 'type' { toLabel $1 }
   | 'where' { toLabel $1 }
 
@@ -350,6 +353,7 @@ record :: { Delimited (RecordLabeled (Expr ())) }
 
 recordLabel :: { RecordLabeled (Expr ()) }
   : expr {% toRecordLabeled $1 }
+  | labelKeyword ':' expr { RecordField $1 $2 $3 }
 
 recordUpdateOrLabel :: { Either (RecordLabeled (Expr ())) (RecordUpdate ()) }
   : label ':' expr { Left (RecordField $1 $2 $3) }
