@@ -424,7 +424,7 @@ dataMembers :: { Wrapped (Maybe (DataMembers ())) }
 
 importDecl :: { ImportDecl () }
   : 'import' properIdent imports { ImportDecl () $1 $2 $3 Nothing }
-  | 'import' properIdent imports 'as' proper { ImportDecl () $1 $2 $3 (Just ($4, $5)) }
+  | 'import' properIdent imports 'as' properIdent { ImportDecl () $1 $2 $3 (Just ($4, $5)) }
 
 imports :: { Maybe (Maybe SourceToken, DelimitedNonEmpty (Import ())) }
   : {- empty -} { Nothing }
