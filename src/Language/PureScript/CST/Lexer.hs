@@ -71,17 +71,21 @@ lex src = runParser (initialParserState src) (go mempty)
 
 recover :: ParserErrorType -> ([SourceToken] -> a) -> (SourceToken -> Parser a)
 recover err k tok = do
-  stk <- getLayoutStack
-  let
-    p = case snd $ head stk of
-      LytParen    -> \(_, t) -> t == TokRightParen
-      LytBrace    -> \(_, t) -> t == TokRightBrace
-      LytSquare   -> \(_, t) -> t == TokRightSquare
-      LytIndent _ -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
+  let revert = pushBack tok *> pure [tok]
+  stk  <- getLayoutStack
   toks <-
-    if p tok
-      then pushBack tok *> pure [tok]
-      else (tok :) <$> munchWhile (not . p)
+    if null (endsLayout (snd tok)) && not (null stk)
+      then do
+        let
+          p = case snd $ head stk of
+            LytParen    -> \(_, t) -> t == TokRightParen
+            LytBrace    -> \(_, t) -> t == TokRightBrace
+            LytSquare   -> \(_, t) -> t == TokRightSquare
+            LytIndent _ -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
+        if p tok
+          then revert
+          else (tok :) <$> munchWhile (not . p)
+      else revert
   addFailure toks err
   pure $ k toks
 

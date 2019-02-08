@@ -138,15 +138,15 @@ prettyPrintError (ParserError {..}) =
     ErrBinderInDecl ->
       "Expected declaration, saw pattern"
     ErrRecordUpdateInCtr ->
-      "Expected \":\", saw \"=\""
+      "Expected ':', saw '='"
     ErrRecordPunInUpdate ->
       "Expected record update, saw pun"
     ErrRecordCtrInUpdate ->
-      "Expected \"=\", saw \":\""
+      "Expected '=', saw ':'"
     ErrElseInDecl ->
-      "Expected declaration, saw \"else\""
+      "Expected declaration, saw 'else'"
     ErrImportInDecl ->
-      "Expected declaration, saw \"import\""
+      "Expected declaration, saw 'import'"
     ErrGuardInLetBinder ->
       "Unexpected guard in let pattern"
     ErrKeywordVar ->

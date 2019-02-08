@@ -339,6 +339,7 @@ exprAtom :: { Expr () }
   | array { ExprArray () $1 }
   | record { ExprRecord () $1 }
   | '(' symbol ')' { ExprOpName () (Wrapped $1 $2 $3) }
+  | '(' symbol error {%% recover ErrExpr unexpectedExpr }
   | '(' expr ')' { ExprParens () (Wrapped $1 $2 $3) }
   | error {%% recover ErrExpr unexpectedExpr }
 
