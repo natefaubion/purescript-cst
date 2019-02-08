@@ -73,7 +73,13 @@ insertLayout src@(tokAnn, tok) nextPos stack =
       -- insert a separator. If the line is also the same, that means it's the
       -- first token in the layout, so a separator is unnecessary.
       | srcColumn tokPos == srcColumn lytPos && srcLine tokPos /= srcLine lytPos ->
-          k2 stk $ acc `snoc` lytToken tokPos TokLayoutSep
+          case tok of
+            -- If the token is a symbol, close the layout. Eg. This would mean a binary
+            -- operator would capture a do block on the lhs if the symbol is the
+            -- same indentation as the block.
+            TokSymbol _ _ -> k2 (tail stk) $ acc `snoc` lytToken tokPos TokLayoutEnd
+            -- Otherwise insert a separator
+            _ -> k2 stk $ acc `snoc` lytToken tokPos TokLayoutSep
     -- If the current token closes the current layout context, insert TokLayoutEnd.
     ((_, LytIndent la), cs) | LytIndent la `elem` cs ->
       k2 (tail stk) $ acc `snoc` lytToken tokPos TokLayoutEnd
