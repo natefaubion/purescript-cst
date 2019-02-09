@@ -3,6 +3,7 @@ module Language.PureScript.CST.Monad where
 import Prelude
 
 import Data.Text (Text)
+import Data.Char (isSpace)
 import Language.PureScript.CST.Layout
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Print
@@ -155,6 +156,8 @@ prettyPrintError (ParserError {..}) =
       "Expected symbol, saw reserved symbol"
     ErrEof ->
       "Unexpected end of input"
+    ErrLexeme (Just (hd:_)) _ | isSpace hd ->
+      "Illegal whitespace character " <> show hd
     ErrLexeme (Just a) _ ->
       "Unexpected input " <> show a
     ErrLexeme _ _ ->
