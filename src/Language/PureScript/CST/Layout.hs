@@ -36,15 +36,6 @@ startsLayout = \case
   TokLowerName _ "ado"    -> Just (LytIndent LytAdo)
   _                       -> Nothing
 
-endsLayout :: Token -> [Layout]
-endsLayout = \case
-  TokRightParen           -> [LytParen]
-  TokRightBrace           -> [LytBrace]
-  TokRightSquare          -> [LytSquare]
-  TokLowerName [] "in"    -> [LytIndent LytLet, LytIndent LytAdo]
-  TokLowerName [] "where" -> [LytIndent LytOf, LytIndent LytDo]
-  _ -> []
-
 lytToken :: SourcePos -> Token -> SourceToken
 lytToken pos = (ann,)
   where
