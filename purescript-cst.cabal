@@ -1,8 +1,10 @@
--- This file has been generated from package.yaml by hpack version 0.28.2.
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.1.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: e6a9a9777f8bd49a0ade45338b2907616781736884f849a7edc729963132ab34
+-- hash: 033dace14db78b9e83d9226d7bd79fa1271213f2701522d318fa59796fb6c1f3
 
 name:           purescript-cst
 version:        0.1.0.0
@@ -14,7 +16,6 @@ copyright:      2019 Nathan Faubion
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
-cabal-version:  >= 1.10
 extra-source-files:
     README.md
 
@@ -48,6 +49,7 @@ library
     , dlist
     , megaparsec ==7.0.4
     , mtl
+    , pretty-simple
     , prettyprinter ==1.2.1
     , purescript ==0.12.1
     , text
@@ -70,6 +72,7 @@ executable purescript-cst-exe
     , dlist
     , megaparsec ==7.0.4
     , mtl
+    , pretty-simple
     , prettyprinter ==1.2.1
     , purescript ==0.12.1
     , purescript-cst
@@ -94,6 +97,7 @@ test-suite purescript-cst-test
     , dlist
     , megaparsec ==7.0.4
     , mtl
+    , pretty-simple
     , prettyprinter ==1.2.1
     , purescript ==0.12.1
     , purescript-cst
