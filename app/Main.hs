@@ -8,6 +8,7 @@ import qualified Language.PureScript.CST.Monad as CST
 import qualified Language.PureScript.CST.Parser as CST
 import qualified Language.PureScript.CST.Print as CST
 import System.Environment (getArgs)
+import Text.Pretty.Simple (pPrint, pPrintLightBg)
 
 main :: IO ()
 main = do
@@ -22,6 +23,6 @@ main = do
       for_ errs $ \err -> do
         putStrLn $ CST.prettyPrintError err
     Right m -> do
-      putStrLn $ show m
+      -- pPrintLightBg m
+      -- pPrint m
       putStrLn "[OK]"
-

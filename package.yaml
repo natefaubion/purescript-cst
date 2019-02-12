@@ -78,6 +78,7 @@ dependencies:
 - criterion
 - containers
 - array
+- pretty-simple
 
 library:
   source-dirs: src
