@@ -74,18 +74,21 @@ recover err k tok = do
   let revert = pushBack tok *> pure [tok]
   stk  <- getLayoutStack
   toks <-
-    if null (endsLayout (snd tok)) && not (null stk)
-      then do
-        let
-          p = case snd $ head stk of
-            LytParen    -> \(_, t) -> t == TokRightParen
-            LytBrace    -> \(_, t) -> t == TokRightBrace
-            LytSquare   -> \(_, t) -> t == TokRightSquare
-            LytIndent _ -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
-        if p tok
-          then revert
-          else (tok :) <$> munchWhile (not . p)
-      else revert
+    case snd tok of
+      TokRightParen           -> revert
+      TokRightBrace           -> revert
+      TokRightSquare          -> revert
+      TokLowerName [] "in"    -> pure [tok]
+      TokLowerName [] "where" -> pure [tok]
+      _ | null stk -> revert
+        | otherwise -> do
+            let
+              p = case snd $ head stk of
+                LytParen    -> \(_, t) -> t == TokRightParen
+                LytBrace    -> \(_, t) -> t == TokRightBrace
+                LytSquare   -> \(_, t) -> t == TokRightSquare
+                LytIndent _ -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
+            (tok :) <$> munchWhile (not . p)
   addFailure toks err
   pure $ k toks
 
