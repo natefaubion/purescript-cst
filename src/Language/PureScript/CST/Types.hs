@@ -51,6 +51,7 @@ data Token
   | TokDot
   | TokComma
   | TokUnderscore
+  | TokBackslash
   | TokLowerName [Text] Text
   | TokUpperName [Text] Text
   | TokSymbol [Text] Text

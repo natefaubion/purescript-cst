@@ -28,6 +28,7 @@ printToken = \case
   TokDot                   -> "."
   TokComma                 -> ","
   TokUnderscore            -> "_"
+  TokBackslash             -> "\\"
   TokLowerName qual name   -> printQual qual <> name
   TokUpperName qual name   -> printQual qual <> name
   TokSymbol qual sym       -> printQual qual <> sym

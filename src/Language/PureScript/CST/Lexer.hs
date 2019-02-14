@@ -222,6 +222,7 @@ token = P.choice
       , TokEquals                <$ P.char '='
       , TokPipe                  <$ P.char '|'
       , TokDot                   <$ P.char '.'
+      , TokBackslash             <$ P.char '\\'
       ] <* P.notFollowedBy symbolChar
 
   , P.try $ TokUnderscore <$ (P.char '_' <* P.notFollowedBy identLetter)

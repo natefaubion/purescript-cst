@@ -39,6 +39,7 @@ tokenDelta = \case
   TokDot                   -> (0, 1)
   TokComma                 -> (0, 1)
   TokUnderscore            -> (0, 1)
+  TokBackslash             -> (0, 1)
   TokLowerName qual name   -> (0, qualDelta qual + Text.length name)
   TokUpperName qual name   -> (0, qualDelta qual + Text.length name)
   TokSymbol qual sym       -> (0, qualDelta qual + Text.length sym)

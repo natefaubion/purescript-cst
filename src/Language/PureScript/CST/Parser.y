@@ -48,11 +48,11 @@ import Language.PureScript.CST.Utils
   '.'             { (_, TokDot) }
   ','             { (_, TokComma) }
   '_'             { (_, TokUnderscore) }
+  '\\'            { (_, TokBackslash) }
   '-'             { (_, TokSymbol [] "-") }
   '@'             { (_, TokSymbol [] "@") }
   '#'             { (_, TokSymbol [] "#") }
   '..'            { (_, TokSymbol [] "..") }
-  'lambda'        { (_, TokSymbol [] "\\") }
   'ado'           { (_, TokLowerName _ "ado") }
   'as'            { (_, TokLowerName [] "as") }
   'case'          { (_, TokLowerName [] "case") }
@@ -305,7 +305,7 @@ expr4 :: { Expr () }
   | 'if' expr 'then' expr 'else' expr { ExprIf () (IfThenElse $1 $2 $3 $4 $5 $6) }
   | 'do' '\{' manySep(doStatement, '\;') '\}' { ExprDo () (DoBlock $1 $3) }
   | 'ado' '\{' manySep(doStatement, '\;') '\}' 'in' expr { ExprAdo () (AdoBlock $1 $3 $5 $6) }
-  | 'lambda' expr0 '->' expr {% do bs <- toBinderAtoms $2; pure $ ExprLambda () (Lambda $1 bs $3 $4) }
+  | '\\' expr0 '->' expr {% do bs <- toBinderAtoms $2; pure $ ExprLambda () (Lambda $1 bs $3 $4) }
   | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
   | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
   -- These special cases handle some idiosynchratic syntax that the current
