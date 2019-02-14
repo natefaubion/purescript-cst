@@ -31,7 +31,7 @@ initialParserState src =
         , parserBuff = []
         , parserPos = advanceLeading (SourcePos 1 1) parserLeading
         , parserLeading = parserLeading
-        , parserStack = [(SourcePos 0 0, LytIndent LytRoot)]
+        , parserStack = [(SourcePos 0 0, LytRoot)]
         , parserErrors = []
         }
     (parserNext, _) ->
@@ -40,7 +40,7 @@ initialParserState src =
         , parserBuff = []
         , parserPos = SourcePos 1 1
         , parserLeading = []
-        , parserStack = [(SourcePos 0 0, LytIndent LytRoot)]
+        , parserStack = [(SourcePos 0 0, LytRoot)]
         , parserErrors = []
         }
   where
@@ -84,9 +84,11 @@ recover err k tok = do
         | otherwise -> do
             let
               p = case snd $ head stk of
+                LytRoot     -> \(_, t) -> t == TokEof
                 LytParen    -> \(_, t) -> t == TokRightParen
                 LytBrace    -> \(_, t) -> t == TokRightBrace
                 LytSquare   -> \(_, t) -> t == TokRightSquare
+                LytCase     -> \(_, t) -> t == TokLowerName [] "of"
                 LytIndent _ -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
             (tok :) <$> munchWhile (not . p)
   addFailure toks err
