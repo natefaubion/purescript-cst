@@ -2,5 +2,4 @@ resolver: lts-12.21
 packages:
 - .
 extra-deps:
-- purescript-0.12.1
 - megaparsec-7.0.4
