@@ -136,12 +136,14 @@ ident :: { Ident }
   : IDENT { toIdent $1 }
   | QUAL_IDENT { toIdent $1 }
   | 'as' { toIdent $1 }
+  | 'hiding' { toIdent $1 }
   | 'kind' { toIdent $1 }
 
 var :: { Ident }
   : IDENT {% toVar $1 }
   | 'as' {% toVar $1 }
   | 'kind' {% toVar $1 }
+  | 'hiding' { toIdent $1 }
 
 symbol :: { Ident }
   : SYMBOL {% toSymbol $1 }
