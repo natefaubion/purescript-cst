@@ -81,6 +81,8 @@ insertLayout src@(tokAnn, tok) nextPos stack = k1 stack mempty
     -- edge cases like:
     --     let foo = do do do bar in foo
     ((_, LytIndent _), TokLowerName [] "in")
+      | ((_, LytIndent LytLet) : (_, LytIndent LytAdo) : stk', acc') <- collapse inP stk acc ->
+          k3 stk' $ acc' `snoc` lytToken tokPos TokLayoutEnd `snoc` lytToken tokPos TokLayoutEnd
       | ((_, LytIndent _) : stk', acc') <- collapse inP stk acc ->
           k3 stk' $ acc' `snoc` lytToken tokPos TokLayoutEnd
       where
