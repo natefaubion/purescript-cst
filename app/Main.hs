@@ -1,7 +1,8 @@
 module Main where
 
 import Prelude
-import Data.Foldable (for_)
+import Control.Monad (when)
+import Data.Foldable (for_, find)
 import qualified Data.Text.IO as IO
 import qualified Language.PureScript.CST.Lexer as CST
 import qualified Language.PureScript.CST.Monad as CST
@@ -12,17 +13,22 @@ import Text.Pretty.Simple (pPrint, pPrintLightBg)
 
 main :: IO ()
 main = do
-  file <- head <$> getArgs
+  args <- getArgs
+  let file = case find ((/= '-') . head) args of
+        Nothing -> error "Filepath required."
+        Just a  -> a
   src <- IO.readFile file
   putStrLn file
-  let toks = either (const []) id $ CST.lex src
-  IO.putStrLn $ CST.printTokens toks
-  putStrLn "----------"
+  when ("-t" `elem` args) $ do
+    let toks = either (const []) id $ CST.lex src
+    IO.putStrLn $ CST.printTokens toks
+    putStrLn "----------"
   case CST.parse src of
     Left errs ->
       for_ errs $ \err -> do
         putStrLn $ CST.prettyPrintError err
     Right m -> do
+      when ("-m" `elem` args) $ do
       -- pPrintLightBg m
-      -- pPrint m
+        pPrint m
       putStrLn "[OK]"

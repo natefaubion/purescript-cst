@@ -83,19 +83,20 @@ recover err k tok = do
       _ | null stk -> revert
         | otherwise -> do
             let
-              p = case snd $ head stk of
-                LytRoot      -> \(_, t) -> t == TokEof
-                LytParen     -> \(_, t) -> t == TokRightParen
-                LytBrace     -> \(_, t) -> t == TokRightBrace
-                LytSquare    -> \(_, t) -> t == TokRightSquare
-                LytCase      -> \(_, t) -> t == TokLowerName [] "of"
-                LytTick      -> \(_, t) -> t == TokTick
-                LytLambda    -> \(_, t) -> t == TokRightArrow ASCII || t == TokRightArrow Unicode
-                LytCaseGuard -> \(_, t) -> t == TokPipe || t == TokRightArrow ASCII || t == TokRightArrow Unicode || t == TokLayoutSep || t == TokLayoutEnd
-                LytDeclGuard -> \(_, t) -> t == TokPipe || t == TokEquals || t == TokLayoutSep || t == TokLayoutEnd
-                LytDecl      -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
-                LytDeclWhere -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd || t == TokLowerName [] "where"
-                LytIndent _  -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
+              p = const True
+              -- p = case snd $ head stk of
+              --   LytRoot      -> \(_, t) -> t == TokEof
+              --   LytParen     -> \(_, t) -> t == TokRightParen
+              --   LytBrace     -> \(_, t) -> t == TokRightBrace
+              --   LytSquare    -> \(_, t) -> t == TokRightSquare
+              --   LytCase      -> \(_, t) -> t == TokLowerName [] "of"
+              --   LytTick      -> \(_, t) -> t == TokTick
+              --   LytLambda    -> \(_, t) -> t == TokRightArrow ASCII || t == TokRightArrow Unicode
+              --   LytCaseGuard -> \(_, t) -> t == TokPipe || t == TokRightArrow ASCII || t == TokRightArrow Unicode || t == TokLayoutSep || t == TokLayoutEnd
+              --   LytDeclGuard -> \(_, t) -> t == TokPipe || t == TokEquals || t == TokLayoutSep || t == TokLayoutEnd
+              --   LytDecl      -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
+              --   LytDeclWhere -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd || t == TokLowerName [] "where"
+              --   LytIndent _  -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
             (tok :) <$> munchWhile (not . p)
   addFailure toks err
   pure $ k toks
