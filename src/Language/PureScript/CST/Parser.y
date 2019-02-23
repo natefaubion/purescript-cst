@@ -62,8 +62,8 @@ import Language.PureScript.CST.Utils
   'do'            { (_, TokLowerName _ "do") }
   'else'          { (_, TokLowerName [] "else") }
   'false'         { (_, TokLowerName [] "false") }
-  'forall'        { (_, TokLowerName [] "forall") }
-  'forallu'       { (_, TokSymbol [] "∀") }
+  'forall'        { (_, TokForall ASCII) }
+  'forallu'       { (_, TokForall Unicode) }
   'foreign'       { (_, TokLowerName [] "foreign") }
   'hiding'        { (_, TokLowerName [] "hiding") }
   'import'        { (_, TokLowerName [] "import") }
@@ -150,13 +150,13 @@ var :: { Ident }
   | 'hiding' { toIdent $1 }
 
 symbol :: { Ident }
-  : SYMBOL {% toSymbol $1 }
-  | '<=' {% toSymbol $1 }
-  | '-' {% toSymbol $1 }
-  | '@' {% toSymbol $1 }
-  | '#' {% toSymbol $1 }
-  | ':' {% toSymbol $1 }
-  | '..' {% toSymbol $1 }
+  : SYMBOL { toSymbol $1 }
+  | '<=' { toSymbol $1 }
+  | '-' { toSymbol $1 }
+  | '@' { toSymbol $1 }
+  | '#' { toSymbol $1 }
+  | ':' { toSymbol $1 }
+  | '..' { toSymbol $1 }
 
 label :: { Ident }
   : IDENT { toLabel $1 }
@@ -172,7 +172,6 @@ label :: { Ident }
   | 'else' { toLabel $1 }
   | 'false' { toLabel $1 }
   | 'forall' { toLabel $1 }
-  | 'forallu' { toLabel $1 }
   | 'foreign' { toLabel $1 }
   | 'hiding' { toLabel $1 }
   | 'import' { toLabel $1 }

@@ -226,12 +226,14 @@ token = P.choice
       , TokRightArrow    Unicode <$ P.char '→'
       , TokRightFatArrow ASCII   <$ P.string "=>"
       , TokRightFatArrow Unicode <$ P.char '⇒'
+      , TokForall        Unicode <$ P.char '∀'
       , TokEquals                <$ P.char '='
       , TokPipe                  <$ P.char '|'
       , TokDot                   <$ P.char '.'
       , TokBackslash             <$ P.char '\\'
       ] <* P.notFollowedBy symbolChar
 
+  , P.try $ TokForall ASCII <$ (P.string "forall" <* P.notFollowedBy identLetter)
   , P.try $ TokUnderscore <$ (P.char '_' <* P.notFollowedBy identLetter)
   , P.label "hole" $ P.try $ TokHole <$> (P.char '?' *> lname)
   , P.label "identifier" identifier

@@ -45,6 +45,7 @@ data Token
   | TokRightArrow SourceStyle
   | TokRightFatArrow SourceStyle
   | TokDoubleColon SourceStyle
+  | TokForall SourceStyle
   | TokEquals
   | TokPipe
   | TokTick

@@ -174,11 +174,8 @@ insertLayout src@(tokAnn, tok) nextPos stack =
 
     -- `forall` binders need masking because the usage of `.` should not
     -- introduce a LytProperty context.
-    TokLowerName [] "forall" ->
+    TokForall _ ->
       state & insertKwProperty (pushStack tokPos LytForall)
-
-    TokSymbol [] "∀" ->
-      state & insertDefault & pushStack tokPos LytForall
 
     -- Lambdas need masking because the usage of `->` should not close a
     -- LytDeclGaurd or LytCaseGuard context.

@@ -33,6 +33,8 @@ tokenDelta = \case
   TokRightFatArrow Unicode -> (0, 1)
   TokDoubleColon ASCII     -> (0, 2)
   TokDoubleColon Unicode   -> (0, 1)
+  TokForall ASCII          -> (0, 6)
+  TokForall Unicode        -> (0, 1)
   TokEquals                -> (0, 1)
   TokPipe                  -> (0, 1)
   TokTick                  -> (0, 1)

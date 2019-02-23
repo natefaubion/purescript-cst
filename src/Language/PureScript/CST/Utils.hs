@@ -61,11 +61,9 @@ toVar tok = case tok of
     | otherwise -> parseFail tok ErrKeywordVar
   _ -> internalError $ "Invalid variable token: " <> show tok
 
-toSymbol :: SourceToken -> Parser Ident
+toSymbol :: SourceToken -> Ident
 toSymbol tok = case tok of
-  (_, TokSymbol q a)
-    | not (Set.member a reservedSymbols) -> pure $ Ident tok q a
-    | otherwise -> parseFail tok ErrKeywordSymbol
+  (_, TokSymbol q a) -> Ident tok q a
   _ -> internalError $ "Invalid operator token: " <> show tok
 
 toLabel :: SourceToken -> Ident
@@ -73,6 +71,7 @@ toLabel tok = case tok of
   (_, TokLowerName [] a) -> Ident tok [] a
   (_, TokString _ a)     -> Ident tok [] a
   (_, TokRawString a)    -> Ident tok [] a
+  (_, TokForall ASCII)   -> Ident tok [] "forall"
   _                      -> internalError $ "Invalid label: " <> show tok
 
 labelToVar :: Ident -> Parser Ident
@@ -303,11 +302,6 @@ reservedNames = Set.fromList
   , "true"
   , "type"
   , "where"
-  ]
-
-reservedSymbols :: Set Text
-reservedSymbols = Set.fromList
-  [ "∀"
   ]
 
 exprToken :: Expr a -> SourceToken

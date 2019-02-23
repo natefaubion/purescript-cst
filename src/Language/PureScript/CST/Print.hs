@@ -22,6 +22,8 @@ printToken = \case
   TokRightFatArrow Unicode -> "⇒"
   TokDoubleColon ASCII     -> "::"
   TokDoubleColon Unicode   -> "∷"
+  TokForall ASCII          -> "forall"
+  TokForall Unicode        -> "∀"
   TokEquals                -> "="
   TokPipe                  -> "|"
   TokTick                  -> "`"
