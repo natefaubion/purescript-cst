@@ -9,7 +9,7 @@ import qualified Language.PureScript.CST.Monad as CST
 import qualified Language.PureScript.CST.Parser as CST
 import qualified Language.PureScript.CST.Print as CST
 import System.Environment (getArgs)
-import Text.Pretty.Simple (pPrint, pPrintLightBg)
+import Text.Pretty.Simple (pPrint)
 
 main :: IO ()
 main = do
@@ -18,7 +18,6 @@ main = do
         Nothing -> error "Filepath required."
         Just a  -> a
   src <- IO.readFile file
-  putStrLn file
   when ("-t" `elem` args) $ do
     let toks = either (const []) id $ CST.lex src
     IO.putStrLn $ CST.printTokens toks
@@ -26,9 +25,14 @@ main = do
   case CST.parse src of
     Left errs ->
       for_ errs $ \err -> do
-        putStrLn $ CST.prettyPrintError err
+        putStrLn $ ex <> " " <> file <> " " <> CST.prettyPrintError err
     Right m -> do
       when ("-m" `elem` args) $ do
-      -- pPrintLightBg m
         pPrint m
-      putStrLn "[OK]"
+      putStrLn $ check <> " " <> file
+
+check :: String
+check = "\x1b[32m✓\x1b[0m"
+
+ex :: String
+ex = "\x1b[31m✗\x1b[0m"

@@ -65,40 +65,52 @@ insertLayout src@(tokAnn, tok) nextPos stack =
     srcStart $ tokRange tokAnn
 
   insert state@(stk, acc) = case tok of
+    -- `data` declarations need masking (LytTopDecl) because the usage of `|`
+    -- should not introduce a LytDeclGard context.
     TokLowerName [] "data" ->
       case state & insertDefault of
         state'@(stk', _) | isTopDecl tokPos stk' ->
           state' & pushStack tokPos LytTopDecl
-        state' -> state' & popStack (== LytProperty)
+        state' ->
+          state' & popStack (== LytProperty)
 
-    TokLowerName [] "foreign" ->
-      case state & insertDefault of
-        state'@(stk', _) | isTopDecl tokPos stk' ->
-          state' & pushStack tokPos LytTopDecl
-        state' -> state' & popStack (== LytProperty)
-
+    -- `class` declaration heads need masking (LytTopDeclHead) because the
+    -- usage of commas in functional dependencies.
     TokLowerName [] "class" ->
       case state & insertDefault of
         state'@(stk', _) | isTopDecl tokPos stk' ->
           state' & pushStack tokPos LytTopDeclHead
-        state' -> state' & popStack (== LytProperty)
+        state' ->
+          state' & popStack (== LytProperty)
 
     TokLowerName [] "where" ->
       case stk of
         (_, LytTopDeclHead) : stk' ->
           (stk', acc) & insertToken src & insertStart LytWhere
-        (_, LytRoot) : _ ->
-          state & insertToken src & insertStart LytWhere
-        (_, lyt) : _ | isIndented lyt ->
-          state & collapse whereP & insertToken src & insertStart LytWhere
+        (_, LytProperty) : stk' ->
+          (stk', acc) & insertToken src
         _ ->
-          state & insertDefault & popStack (== LytProperty)
+          state & collapse whereP & insertToken src & insertStart LytWhere
       where
+      -- `where` always closes do blocks:
+      --     example = do do do do foo where foo = ...
+      --
+      -- `where` closes layout contexts even when indented at the same level:
+      --     example = case
+      --       Foo -> ...
+      --       Bar -> ...
+      --       where foo = ...
       whereP _      LytDo = True
       whereP lytPos lyt   = offsideEndP lytPos lyt
 
     TokLowerName [] "in" ->
       case collapse inP state of
+        -- `let/in` is not allowed in `ado` syntax. `in` is treated as a
+        -- delimiter and must always close the `ado`.
+        --    example = ado
+        --      foo <- ...
+        --      let bar = ...
+        --      in ...
         ((_, LytLet) : (_, LytAdo) : stk', acc') ->
           (stk', acc') & insertEnd & insertEnd & insertToken src
         ((_, lyt) : stk', acc') | isIndented lyt ->
@@ -111,46 +123,40 @@ insertLayout src@(tokAnn, tok) nextPos stack =
       inP _ lyt    = isIndented lyt
 
     TokLowerName [] "let" ->
-      case state & insertDefault of
-        ((_, LytProperty) : stk', acc') ->
-          (stk', acc')
-        state' ->
-          state' & insertStart LytLet
+      state & insertKwProperty (insertStart LytLet)
 
     TokLowerName _ "do" ->
-      case state & insertDefault of
-        ((_, LytProperty) : stk', acc') ->
-          (stk', acc')
-        state' ->
-          state' & insertStart LytDo
+      state & insertKwProperty (insertStart LytDo)
 
     TokLowerName _ "ado" ->
-      case state & insertDefault of
-        ((_, LytProperty) : stk', acc') ->
-          (stk', acc')
-        state' ->
-          state' & insertStart LytAdo
+      state & insertKwProperty (insertStart LytAdo)
 
+    -- `case` heads need masking due to commas.
     TokLowerName [] "case" ->
-      case state & insertDefault of
-        ((_, LytProperty) : stk', acc') ->
-          (stk', acc')
-        state' ->
-          state' & pushStack tokPos LytCase
+      state & insertKwProperty (pushStack tokPos LytCase)
 
     TokLowerName [] "of" ->
       case collapse indentedP state of
+        -- When `of` is matched with a `case`, we are in a case block, and we
+        -- need to mask additional contexts (LytCaseBinders, LytCaseGuards)
+        -- due to commas.
         ((_, LytCase) : stk', acc') ->
           (stk', acc') & insertToken src & insertStart LytOf & pushStack nextPos LytCaseBinders
         state' ->
           state' & insertDefault & popStack (== LytProperty)
 
+    -- `if/then/else` is considered a delimiter context. This allows us to
+    -- write chained expressions in `do` blocks without stair-stepping:
+    --     example = do
+    --       foo
+    --       if ... then
+    --         ...
+    --       else if ... then
+    --         ...
+    --       else
+    --         ...
     TokLowerName [] "if" ->
-      case state & insertDefault of
-        ((_, LytProperty) : stk', acc') ->
-          (stk', acc')
-        state' ->
-          state' & pushStack tokPos LytIf
+      state & insertKwProperty (pushStack tokPos LytIf)
 
     TokLowerName [] "then" ->
       case state & collapse indentedP of
@@ -166,16 +172,16 @@ insertLayout src@(tokAnn, tok) nextPos stack =
         _ ->
           state & insertDefault & popStack (== LytProperty)
 
+    -- `forall` binders need masking because the usage of `.` should not
+    -- introduce a LytProperty context.
     TokLowerName [] "forall" ->
-      case state & insertDefault of
-        ((_, LytProperty) : stk', acc') ->
-          (stk', acc')
-        state' ->
-          state' & pushStack tokPos LytForall
+      state & insertKwProperty (pushStack tokPos LytForall)
 
     TokSymbol [] "∀" ->
       state & insertDefault & pushStack tokPos LytForall
 
+    -- Lambdas need masking because the usage of `->` should not close a
+    -- LytDeclGaurd or LytCaseGuard context.
     TokBackslash ->
       state & insertDefault & pushStack tokPos LytLambdaBinders
 
@@ -192,22 +198,17 @@ insertLayout src@(tokAnn, tok) nextPos stack =
       guardP _                = False
 
     TokEquals ->
-      case stk of
-        (_, LytLet) : _ ->
-          state & insertToken src
-        (_, LytWhere) : _ ->
-          state & insertToken src
+      case state & collapse equalsP of
+        ((_, LytDeclGuard) : stk', acc') ->
+          (stk', acc') & insertToken src
         _ ->
-          case state & collapse equalsP of
-            ((_, LytDeclGuard) : stk', acc') ->
-              (stk', acc') & insertToken src
-            _ ->
-              state & insertDefault
+          state & insertDefault
       where
       equalsP _ LytWhere = True
       equalsP _ LytLet   = True
       equalsP _ _        = False
 
+    -- Guards need masking because of commas.
     TokPipe ->
       case collapse offsideEndP state of
         state'@((_, LytOf) : _, _) ->
@@ -219,6 +220,9 @@ insertLayout src@(tokAnn, tok) nextPos stack =
         _ ->
           state & insertDefault
 
+    -- Ticks can either start or end an infix expression. We preemptively
+    -- collapse all indentation contexts in search of a starting delimiter,
+    -- and backtrack if we don't find one.
     TokTick ->
       case state & collapse indentedP of
         ((_, LytTick) : stk', acc') ->
@@ -226,15 +230,21 @@ insertLayout src@(tokAnn, tok) nextPos stack =
         _ ->
           state & insertDefault & pushStack tokPos LytTick
 
+    -- In gneral, commas should close all indented contexts.
+    --     example = [ do foo
+    --                    bar, baz ]
     TokComma ->
       case state & collapse indentedP of
-        ([(_, LytRoot)], _) ->
-          state & insertDefault
+        -- If we see a LytBrace, then we are in a record type or literal.
+        -- Record labels need masking so we can use unquoted keywords as labels
+        -- without accidentally littering layout delimiters.
         state'@((_, LytBrace) : _, _) ->
           state' & insertToken src & pushStack tokPos LytProperty
         state' ->
           state' & insertToken src
 
+    -- TokDot tokens usually entail property access, which need masking so we
+    -- can use unquoted keywords as labels.
     TokDot ->
       case state & insertDefault of
         ((_, LytForall) : stk', acc') ->
@@ -279,17 +289,28 @@ insertLayout src@(tokAnn, tok) nextPos stack =
     state & pushStack nextPos lyt & insertToken (lytToken nextPos TokLayoutStart)
 
   insertSep state@(stk, acc) = case stk of
+    -- LytTopDecl is closed by a separator.
     (lytPos, LytTopDecl) : stk' | sepP lytPos ->
       (stk', acc) & insertToken sepTok
+    -- LytTopDeclHead can be closed by a separator if there is no `where`.
     (lytPos, LytTopDeclHead) : stk' | sepP lytPos ->
       (stk', acc) & insertToken sepTok
     (lytPos, lyt) : _ | indentSepP lytPos lyt ->
       case lyt of
+        -- If a separator is inserted in a case block, we need to push an
+        -- additional LytCaseBinders context for comma masking.
         LytOf -> state & insertToken sepTok & pushStack tokPos LytCaseBinders
         _     -> state & insertToken sepTok
     _ -> state
     where
     sepTok = lytToken tokPos TokLayoutSep
+
+  insertKwProperty k state =
+    case state & insertDefault of
+      ((_, LytProperty) : stk', acc') ->
+        (stk', acc')
+      state' ->
+        k state'
 
   insertEnd =
     insertToken (lytToken tokPos TokLayoutEnd)
