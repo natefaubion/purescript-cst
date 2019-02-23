@@ -23,6 +23,7 @@ data LayoutDelim
   | LytSquare
   | LytIf
   | LytThen
+  | LytProperty
   | LytTick
   | LytLet
   | LytWhere
@@ -67,19 +68,19 @@ insertLayout src@(tokAnn, tok) nextPos stack =
       case state & insertDefault of
         state'@(stk', _) | isTopDecl tokPos stk' ->
           state' & pushStack tokPos LytTopDecl
-        state' -> state'
+        state' -> state' & popStack (== LytProperty)
 
     TokLowerName [] "foreign" ->
       case state & insertDefault of
         state'@(stk', _) | isTopDecl tokPos stk' ->
           state' & pushStack tokPos LytTopDecl
-        state' -> state'
+        state' -> state' & popStack (== LytProperty)
 
     TokLowerName [] "class" ->
       case state & insertDefault of
         state'@(stk', _) | isTopDecl tokPos stk' ->
           state' & pushStack tokPos LytTopDeclHead
-        state' -> state'
+        state' -> state' & popStack (== LytProperty)
 
     TokLowerName [] "where" ->
       case stk of
@@ -90,7 +91,7 @@ insertLayout src@(tokAnn, tok) nextPos stack =
         (_, lyt) : _ | isIndented lyt ->
           state & collapse whereP & insertToken src & insertStart LytWhere
         _ ->
-          state & insertDefault
+          state & insertDefault & popStack (== LytProperty)
       where
       whereP _      LytDo = True
       whereP lytPos lyt   = offsideEndP lytPos lyt
@@ -102,47 +103,67 @@ insertLayout src@(tokAnn, tok) nextPos stack =
         ((_, lyt) : stk', acc') | isIndented lyt ->
           (stk', acc') & insertEnd & insertToken src
         _ ->
-          state & insertDefault
+          state & insertDefault & popStack (== LytProperty)
       where
       inP _ LytLet = False
       inP _ LytAdo = False
       inP _ lyt    = isIndented lyt
 
     TokLowerName [] "let" ->
-      state & insertDefault & insertStart LytLet
+      case state & insertDefault of
+        ((_, LytProperty) : stk', acc') ->
+          (stk', acc')
+        state' ->
+          state' & insertStart LytLet
 
     TokLowerName _ "do" ->
-      state & insertDefault & insertStart LytDo
+      case state & insertDefault of
+        ((_, LytProperty) : stk', acc') ->
+          (stk', acc')
+        state' ->
+          state' & insertStart LytDo
 
     TokLowerName _ "ado" ->
-      state & insertDefault & insertStart LytAdo
+      case state & insertDefault of
+        ((_, LytProperty) : stk', acc') ->
+          (stk', acc')
+        state' ->
+          state' & insertStart LytAdo
 
     TokLowerName [] "case" ->
-      state & insertDefault & pushStack tokPos LytCase
+      case state & insertDefault of
+        ((_, LytProperty) : stk', acc') ->
+          (stk', acc')
+        state' ->
+          state' & pushStack tokPos LytCase
 
     TokLowerName [] "of" ->
       case collapse indentedP state of
         ((_, LytCase) : stk', acc') ->
           (stk', acc') & insertToken src & insertStart LytOf & pushStack nextPos LytCaseBinders
         state' ->
-          state' & insertDefault
+          state' & insertDefault & popStack (== LytProperty)
 
     TokLowerName [] "if" ->
-      state & insertDefault & pushStack tokPos LytIf
+      case state & insertDefault of
+        ((_, LytProperty) : stk', acc') ->
+          (stk', acc')
+        state' ->
+          state' & pushStack tokPos LytIf
 
     TokLowerName [] "then" ->
       case state & collapse indentedP of
         ((_, LytIf) : stk', acc') ->
-          (stk', acc') & insertToken src
+          (stk', acc') & insertToken src & pushStack tokPos LytThen
         _ ->
-          state & insertDefault
+          state & insertDefault & popStack (== LytProperty)
 
     TokLowerName [] "else" ->
       case state & collapse indentedP of
         ((_, LytThen) : stk', acc') ->
           (stk', acc') & insertToken src
         _ ->
-          state & insertDefault
+          state & insertDefault & popStack (== LytProperty)
 
     TokBackslash ->
       state & insertDefault & pushStack tokPos LytLambdaBinders
@@ -165,9 +186,11 @@ insertLayout src@(tokAnn, tok) nextPos stack =
           state & insertToken src
         (_, LytWhere) : _ ->
           state & insertToken src
-        _ | ((_, LytDeclGuard) : stk', acc') <- collapse equalsP state ->
+        _ ->
+          case state & collapse equalsP of
+            ((_, LytDeclGuard) : stk', acc') ->
               (stk', acc') & insertToken src
-          | otherwise ->
+            _ ->
               state & insertDefault
       where
       equalsP _ LytWhere = True
@@ -186,22 +209,29 @@ insertLayout src@(tokAnn, tok) nextPos stack =
           state & insertDefault
 
     TokTick ->
-      case stk of
-        (_, LytTick) : stk' ->
-          (stk', acc) & insertToken src
-        _ | ((_, LytTick) : stk', acc') <- collapse indentedP state ->
-              (stk', acc') & insertToken src
-          | otherwise ->
-              state & insertDefault & pushStack tokPos LytTick
+      case state & collapse indentedP of
+        ((_, LytTick) : stk', acc') ->
+          (stk', acc') & insertToken src
+        _ ->
+          state & insertDefault & pushStack tokPos LytTick
 
     TokComma ->
-      state & collapse indentedP & insertToken src
+      case state & collapse indentedP of
+        ([(_, LytRoot)], _) ->
+          state & insertDefault
+        state'@((_, LytBrace) : _, _) ->
+          state' & insertToken src & pushStack tokPos LytProperty
+        state' ->
+          state' & insertToken src
+
+    TokDot ->
+      state & insertDefault & pushStack tokPos LytProperty
 
     TokLeftParen ->
       state & insertDefault & pushStack tokPos LytParen
 
     TokLeftBrace ->
-      state & insertDefault & pushStack tokPos LytBrace
+      state & insertDefault & pushStack tokPos LytBrace & pushStack tokPos LytProperty
 
     TokLeftSquare ->
       state & insertDefault & pushStack tokPos LytSquare
@@ -210,10 +240,16 @@ insertLayout src@(tokAnn, tok) nextPos stack =
       state & collapse indentedP & popStack (== LytParen) & insertToken src
 
     TokRightBrace ->
-      state & collapse indentedP & popStack (== LytBrace) & insertToken src
+      state & collapse indentedP & popStack (== LytProperty) & popStack (== LytBrace) & insertToken src
 
     TokRightSquare ->
       state & collapse indentedP & popStack (== LytSquare) & insertToken src
+
+    TokString _ _ ->
+      state & insertDefault & popStack (== LytProperty)
+
+    TokLowerName [] _ ->
+      state & insertDefault & popStack (== LytProperty)
 
     TokSymbol _ _ ->
       state & collapse offsideEndP & insertSep & insertToken src
