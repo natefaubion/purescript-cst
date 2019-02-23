@@ -24,6 +24,7 @@ data LayoutDelim
   | LytIf
   | LytThen
   | LytProperty
+  | LytForall
   | LytTick
   | LytLet
   | LytWhere
@@ -165,6 +166,16 @@ insertLayout src@(tokAnn, tok) nextPos stack =
         _ ->
           state & insertDefault & popStack (== LytProperty)
 
+    TokLowerName [] "forall" ->
+      case state & insertDefault of
+        ((_, LytProperty) : stk', acc') ->
+          (stk', acc')
+        state' ->
+          state' & pushStack tokPos LytForall
+
+    TokSymbol [] "∀" ->
+      state & insertDefault & pushStack tokPos LytForall
+
     TokBackslash ->
       state & insertDefault & pushStack tokPos LytLambdaBinders
 
@@ -225,7 +236,11 @@ insertLayout src@(tokAnn, tok) nextPos stack =
           state' & insertToken src
 
     TokDot ->
-      state & insertDefault & pushStack tokPos LytProperty
+      case state & insertDefault of
+        ((_, LytForall) : stk', acc') ->
+          (stk', acc')
+        state' ->
+          state' & pushStack tokPos LytProperty
 
     TokLeftParen ->
       state & insertDefault & pushStack tokPos LytParen
