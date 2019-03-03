@@ -88,211 +88,206 @@ sepLast :: Separated a -> a
 sepLast (Separated hd []) = hd
 sepLast (Separated _ tl) = snd $ last tl
 
+type TokenRange = (SourceToken, SourceToken)
+
+toSourceRange :: TokenRange -> SourceRange
+toSourceRange (a, b) = widen (srcRange a) (srcRange b)
+
 widen :: SourceRange -> SourceRange -> SourceRange
 widen (SourceRange s1 _) (SourceRange _ e2) = SourceRange s1 e2
 
 srcRange :: SourceToken -> SourceRange
 srcRange = tokRange . fst
 
-identRange :: Ident -> SourceRange
-identRange = srcRange . identTok
+identRange :: Ident -> TokenRange
+identRange a = (identTok a, identTok a)
 
-wrappedRange :: Wrapped a -> SourceRange
-wrappedRange (Wrapped { wrpOpen, wrpClose }) =
-  widen (srcRange wrpOpen) (srcRange wrpClose)
+wrappedRange :: Wrapped a -> TokenRange
+wrappedRange (Wrapped { wrpOpen, wrpClose }) = (wrpOpen, wrpClose)
 
-moduleRange :: Module a -> SourceRange
+moduleRange :: Module a -> TokenRange
 moduleRange (Module { modKeyword, modWhere, modImports, modDecls }) =
   case (modImports, modDecls) of
-    ([], []) -> widen start $ srcRange modWhere
-    (is, []) -> widen start . importDeclRange $ last is
-    (_,  ds) -> widen start . declRange $ last ds
-  where start = srcRange modKeyword
+    ([], []) -> (modKeyword, modWhere)
+    (is, []) -> (modKeyword, snd . importDeclRange $ last is)
+    (_,  ds) -> (modKeyword, snd . declRange $ last ds)
 
-importDeclRange :: ImportDecl a -> SourceRange
+importDeclRange :: ImportDecl a -> TokenRange
 importDeclRange (ImportDecl { impKeyword, impModule, impNames, impQual })
-  | Just (_, ident) <- impQual = widen start $ identRange ident
-  | Just (_, imports) <- impNames = widen start $ wrappedRange imports
-  | otherwise = widen start $ identRange impModule
-  where start = srcRange impKeyword
+  | Just (_, ident) <- impQual = (impKeyword, identTok ident)
+  | Just (_, imports) <- impNames = (impKeyword, wrpClose imports)
+  | otherwise = (impKeyword, identTok impModule)
 
-declRange :: Declaration a -> SourceRange
+declRange :: Declaration a -> TokenRange
 declRange = \case
   DeclData _ hd ctors
-    | Just (_, cs) <- ctors -> widen start $ dataCtorRange $ sepLast cs
+    | Just (_, cs) <- ctors -> (fst start, snd . dataCtorRange $ sepLast cs)
     | otherwise -> start
     where start = dataHeadRange hd
-  DeclType _ a _ b -> widen (dataHeadRange a) (typeRange b)
-  DeclNewtype _ a _ _ b -> widen (dataHeadRange a) (typeRange b)
+  DeclType _ a _ b -> (fst $ dataHeadRange a,  snd $ typeRange b)
+  DeclNewtype _ a _ _ b -> (fst $ dataHeadRange a, snd $ typeRange b)
   DeclClass _ hd body
-    | Just (t, []) <- body -> widen start $ srcRange t
-    | Just (_, ts) <- body -> widen start $ typeRange $ lblValue $ last ts
+    | Just (t, []) <- body -> (fst start, t)
+    | Just (_, ts) <- body -> (fst start, snd . typeRange . lblValue $ last ts)
     | otherwise -> start
     where start = classHeadRange hd
-  DeclInstanceChain _ a -> widen (instanceRange $ sepHead a) (instanceRange $ sepLast a)
-  DeclDerive _ a _ b -> widen (srcRange a) (instanceHeadRange b)
-  DeclSignature _ (Labeled a _ b) -> widen (identRange a) (typeRange b)
+  DeclInstanceChain _ a -> (fst . instanceRange $ sepHead a, snd . instanceRange $ sepLast a)
+  DeclDerive _ a _ b -> (a, snd $ instanceHeadRange b)
+  DeclSignature _ (Labeled a _ b) -> (identTok a, snd $ typeRange b)
   DeclValue _ a -> valueBindingFieldsRange a
-  DeclFixity _ (FixityFields a _ _ _ _ b) -> widen (srcRange a) (identRange b)
-  DeclForeign _ a _ b -> widen (srcRange a) (foreignRange b)
+  DeclFixity _ (FixityFields a _ _ _ _ b) -> (a, identTok b)
+  DeclForeign _ a _ b -> (a, snd $ foreignRange b)
 
-dataHeadRange :: DataHead a -> SourceRange
+dataHeadRange :: DataHead a -> TokenRange
 dataHeadRange (DataHead kw name vars)
-  | [] <- vars = widen start $ identRange name
-  | otherwise = widen start $ typeVarBindingRange $ last vars
-  where start = srcRange kw
+  | [] <- vars = (kw, identTok name)
+  | otherwise = (kw, snd . typeVarBindingRange $ last vars)
 
-dataCtorRange :: DataCtor a -> SourceRange
+dataCtorRange :: DataCtor a -> TokenRange
 dataCtorRange (DataCtor _ name fields)
-  | [] <- fields = start
-  | otherwise = widen start $ typeRange $ last fields
-  where start = identRange name
+  | [] <- fields = identRange name
+  | otherwise = (identTok name, snd . typeRange $ last fields)
 
-classHeadRange :: ClassHead a -> SourceRange
+classHeadRange :: ClassHead a -> TokenRange
 classHeadRange (ClassHead kw _ name vars fdeps)
-  | Just (_, fs) <- fdeps = widen start $ classFundepRange $ sepLast fs
-  | [] <- vars = widen start $ identRange name
-  | otherwise = widen start $ typeVarBindingRange $ last vars
-  where start = srcRange kw
+  | Just (_, fs) <- fdeps = (kw, snd .classFundepRange $ sepLast fs)
+  | [] <- vars = (kw, snd $ identRange name)
+  | otherwise = (kw, snd . typeVarBindingRange $ last vars)
 
-classFundepRange :: ClassFundep -> SourceRange
+classFundepRange :: ClassFundep -> TokenRange
 classFundepRange = \case
-  ClassFundep [] arr [] -> srcRange arr
-  ClassFundep as arr [] -> widen (identRange $ head as) (srcRange arr)
-  ClassFundep [] arr bs -> widen (srcRange arr) (identRange $ last bs)
-  ClassFundep as _   bs -> widen (identRange $ head as) (identRange $ last bs)
+  ClassFundep [] arr [] -> (arr, arr)
+  ClassFundep as arr [] -> (identTok $ head as, arr)
+  ClassFundep [] arr bs -> (arr, identTok $ last bs)
+  ClassFundep as _   bs -> (identTok $ head as, identTok $ last bs)
 
-instanceRange :: Instance a -> SourceRange
+instanceRange :: Instance a -> TokenRange
 instanceRange (Instance hd bd)
-  | Just (t, []) <- bd = widen start $ srcRange t
-  | Just (_, ts) <- bd = widen start $ instanceBindingRange $ last ts
+  | Just (t, []) <- bd = (fst start, t)
+  | Just (_, ts) <- bd = (fst start, snd . instanceBindingRange $ last ts)
   | otherwise = start
   where start = instanceHeadRange hd
 
-instanceHeadRange :: InstanceHead a -> SourceRange
+instanceHeadRange :: InstanceHead a -> TokenRange
 instanceHeadRange (InstanceHead kw _ _ _ cls types)
-  | [] <- types = widen start $ typeRange $ last types
-  | otherwise = widen start $ identRange cls
-  where start = srcRange kw
+  | [] <- types = (kw, snd . typeRange $ last types)
+  | otherwise = (kw, identTok cls)
 
-instanceBindingRange :: InstanceBinding a -> SourceRange
+instanceBindingRange :: InstanceBinding a -> TokenRange
 instanceBindingRange = \case
-  InstanceBindingSignature _ (Labeled a _ b) -> widen (identRange a) (typeRange b)
+  InstanceBindingSignature _ (Labeled a _ b) -> (identTok a, snd $ typeRange b)
   InstanceBindingName _ a -> valueBindingFieldsRange a
 
-foreignRange :: Foreign a -> SourceRange
+foreignRange :: Foreign a -> TokenRange
 foreignRange = \case
-  ForeignValue (Labeled a _ b) -> widen (identRange a) (typeRange b)
-  ForeignData a (Labeled _ _ b) -> widen (srcRange a) (kindRange b)
-  ForeignKind a b -> widen (srcRange a) (identRange b)
+  ForeignValue (Labeled a _ b) -> (identTok a, snd $ typeRange b)
+  ForeignData a (Labeled _ _ b) -> (a, snd $ kindRange b)
+  ForeignKind a b -> (a, identTok b)
 
-valueBindingFieldsRange :: ValueBindingFields a -> SourceRange
-valueBindingFieldsRange (ValueBindingFields a _ b) = widen (identRange a) (guardedRange b)
+valueBindingFieldsRange :: ValueBindingFields a -> TokenRange
+valueBindingFieldsRange (ValueBindingFields a _ b) = (identTok a, snd $ guardedRange b)
 
-guardedRange :: Guarded a -> SourceRange
+guardedRange :: Guarded a -> TokenRange
 guardedRange = \case
-  Unconditional a b -> widen (srcRange a) (exprRange b)
-  Guarded as -> widen (guardedExprRange $ head as) (guardedExprRange $ last as)
+  Unconditional a b -> (a, snd $ exprRange b)
+  Guarded as -> (fst . guardedExprRange $ head as, snd . guardedExprRange $ last as)
 
-guardedExprRange :: GuardedExpr a -> SourceRange
-guardedExprRange (GuardedExpr a _ _ b) = widen (srcRange a) (exprRange b)
+guardedExprRange :: GuardedExpr a -> TokenRange
+guardedExprRange (GuardedExpr a _ _ b) = (a, snd $ exprRange b)
 
-kindRange :: Kind a -> SourceRange
+kindRange :: Kind a -> TokenRange
 kindRange = \case
   KindName _ a -> identRange a
-  KindArr _ a _ b -> widen (kindRange a) (kindRange b)
-  KindRow _ a b -> widen (srcRange a) (kindRange b)
+  KindArr _ a _ b -> (fst $ kindRange a, snd $ kindRange b)
+  KindRow _ a b -> (a, snd $ kindRange b)
   KindParens _ a -> wrappedRange a
 
-typeRange :: Type a -> SourceRange
+typeRange :: Type a -> TokenRange
 typeRange = \case
   TypeVar _ a -> identRange a
   TypeConstructor _ a -> identRange a
-  TypeWildcard _ a -> srcRange a
+  TypeWildcard _ a -> (a, a)
   TypeHole _ a -> identRange a
-  TypeString _ a _ -> srcRange a
+  TypeString _ a _ -> (a, a)
   TypeRow _ a -> wrappedRange a
   TypeRecord _ a -> wrappedRange a
-  TypeForall _ a _ _ b -> widen (srcRange a) (typeRange b)
-  TypeKinded _ a _ b -> widen (typeRange a) (kindRange b)
-  TypeApp _ a b -> widen (typeRange a) (typeRange b)
-  TypeOp _ a _ b -> widen (typeRange a) (typeRange b)
+  TypeForall _ a _ _ b -> (a, snd $ typeRange b)
+  TypeKinded _ a _ b -> (fst $ typeRange a, snd $ kindRange b)
+  TypeApp _ a b -> (fst $ typeRange a, snd $ typeRange b)
+  TypeOp _ a _ b -> (fst $ typeRange a, snd $ typeRange b)
   TypeOpName _ a -> wrappedRange a
-  TypeArr _ a _ b -> widen (typeRange a) (typeRange b)
+  TypeArr _ a _ b -> (fst $ typeRange a, snd $ typeRange b)
   TypeArrName _ a -> wrappedRange a
-  TypeConstrained _ a _ b -> widen (typeRange a) (typeRange b)
+  TypeConstrained _ a _ b -> (fst $ typeRange a, snd $ typeRange b)
   TypeParens _ a -> wrappedRange a
 
-typeVarBindingRange :: TypeVarBinding a -> SourceRange
+typeVarBindingRange :: TypeVarBinding a -> TokenRange
 typeVarBindingRange = \case
   TypeVarKinded a -> wrappedRange a
   TypeVarName a -> identRange a
 
-exprRange :: Expr a -> SourceRange
+exprRange :: Expr a -> TokenRange
 exprRange = \case
   ExprHole _ a -> identRange a
-  ExprSection _ a -> srcRange a
+  ExprSection _ a -> (a, a)
   ExprIdent _ a -> identRange a
   ExprConstructor _ a -> identRange a
-  ExprBoolean _ a _ -> srcRange a
-  ExprChar _ a _ -> srcRange a
-  ExprString _ a _ -> srcRange a
-  ExprNumber _ a _ -> srcRange a
+  ExprBoolean _ a _ -> (a, a)
+  ExprChar _ a _ -> (a, a)
+  ExprString _ a _ -> (a, a)
+  ExprNumber _ a _ -> (a, a)
   ExprArray _ a -> wrappedRange a
   ExprRecord _ a -> wrappedRange a
   ExprParens _ a -> wrappedRange a
-  ExprTyped _ a _ b -> widen (exprRange a) (typeRange b)
-  ExprInfix _ a _ b -> widen (exprRange a) (exprRange b)
-  ExprOp _ a _ b -> widen (exprRange a) (exprRange b)
+  ExprTyped _ a _ b -> (fst $ exprRange a, snd $ typeRange b)
+  ExprInfix _ a _ b -> (fst $ exprRange a, snd $ exprRange b)
+  ExprOp _ a _ b -> (fst $ exprRange a, snd $ exprRange b)
   ExprOpName _ a -> wrappedRange a
-  ExprNegate _ a b -> widen (srcRange a) (exprRange b)
-  ExprRecordAccessor _ (RecordAccessor a _ b) -> widen (exprRange a) (identRange $ sepLast b)
-  ExprRecordUpdate _ a b -> widen (exprRange a) (wrappedRange b)
-  ExprApp _ a b -> widen (exprRange a) (exprRange b)
-  ExprLambda _ (Lambda a _ _ b) -> widen (srcRange a) (exprRange b)
-  ExprIf _ (IfThenElse a _ _ _ _ b) -> widen (srcRange a) (exprRange b)
+  ExprNegate _ a b -> (a, snd $ exprRange b)
+  ExprRecordAccessor _ (RecordAccessor a _ b) -> (fst $ exprRange a, identTok $ sepLast b)
+  ExprRecordUpdate _ a b -> (fst $ exprRange a, snd $ wrappedRange b)
+  ExprApp _ a b -> (fst $ exprRange a, snd $ exprRange b)
+  ExprLambda _ (Lambda a _ _ b) -> (a, snd $ exprRange b)
+  ExprIf _ (IfThenElse a _ _ _ _ b) -> (a, snd $ exprRange b)
   ExprCase _ (CaseOf a _ b c)
-    | [] <- c -> widen start $ srcRange b
-    | otherwise -> widen start $ guardedRange $ snd $ last c
-    where start = srcRange a
-  ExprLet _ (LetIn a _ _ b) -> widen (srcRange a) (exprRange b)
+    | [] <- c -> (a, b)
+    | otherwise -> (a, snd . guardedRange . snd $ last c)
+  ExprLet _ (LetIn a _ _ b) -> (a, snd $ exprRange b)
   ExprWhere _ (Where a b c)
-    | [] <- c -> widen start $ srcRange b
-    | otherwise -> widen start $ letBindingRange $ last c
-    where start = exprRange a
-  ExprDo _ (DoBlock a b) -> widen (srcRange a) (doStatementRange $ last b)
-  ExprAdo _ (AdoBlock a _ _ b) -> widen (srcRange a) (exprRange b)
+    | [] <- c -> (start, b)
+    | otherwise -> (start, snd . letBindingRange $ last c)
+    where start = fst $ exprRange a
+  ExprDo _ (DoBlock a b) -> (a,  snd . doStatementRange $ last b)
+  ExprAdo _ (AdoBlock a _ _ b) -> (a, snd $ exprRange b)
 
-letBindingRange :: LetBinding a -> SourceRange
+letBindingRange :: LetBinding a -> TokenRange
 letBindingRange = \case
-  LetBindingSignature _ (Labeled a _ b) -> widen (identRange a) (typeRange b)
+  LetBindingSignature _ (Labeled a _ b) -> (identTok a, snd $ typeRange b)
   LetBindingName _ a -> valueBindingFieldsRange a
-  LetBindingPattern _ a _ b -> widen (binderRange a) (exprRange b)
+  LetBindingPattern _ a _ b -> (fst $ binderRange a, snd $ exprRange b)
 
-doStatementRange :: DoStatement a -> SourceRange
+doStatementRange :: DoStatement a -> TokenRange
 doStatementRange = \case
-  DoLet a bs -> widen (srcRange a) (letBindingRange $ last bs)
+  DoLet a bs -> (a, snd . letBindingRange $ last bs)
   DoDiscard a -> exprRange a
-  DoBind a _ b -> widen (binderRange a) (exprRange b)
+  DoBind a _ b -> (fst $ binderRange a, snd $ exprRange b)
 
-binderRange :: Binder a -> SourceRange
+binderRange :: Binder a -> TokenRange
 binderRange = \case
-  BinderWildcard _ a -> srcRange a
+  BinderWildcard _ a -> (a, a)
   BinderVar _ a -> identRange a
-  BinderNamed _ a _ b -> widen (identRange a) (binderRange b)
+  BinderNamed _ a _ b -> (identTok a, snd $ binderRange b)
   BinderConstructor _ a bs
-    | [] <- bs -> start
-    | otherwise -> widen start $ binderRange $ last bs
-    where start = identRange a
-  BinderBoolean _ a _ -> srcRange a
-  BinderChar _ a _ -> srcRange a
-  BinderString _ a _ -> srcRange a
+    | [] <- bs -> identRange a
+    | otherwise -> (identTok a, snd . binderRange $ last bs)
+  BinderBoolean _ a _ -> (a, a)
+  BinderChar _ a _ -> (a, a)
+  BinderString _ a _ -> (a, a)
   BinderNumber _ a b _
-    | Just a' <- a -> widen (srcRange a') end
-    | otherwise -> end
-    where end = srcRange b
+    | Just a' <- a -> (a', b)
+    | otherwise -> (b, b)
   BinderArray _ a -> wrappedRange a
   BinderRecord _ a -> wrappedRange a
   BinderParens _ a -> wrappedRange a
-  BinderTyped _ a _ b -> widen (binderRange a) (typeRange b)
-  BinderOp _ a _ b -> widen (binderRange a) (binderRange b)
+  BinderTyped _ a _ b -> (fst $ binderRange a, snd $ typeRange b)
+  BinderOp _ a _ b -> (fst $ binderRange a, snd $ binderRange b)
