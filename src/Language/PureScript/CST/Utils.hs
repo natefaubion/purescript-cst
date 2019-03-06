@@ -2,6 +2,8 @@ module Language.PureScript.CST.Utils where
 
 import Prelude
 
+import Control.Monad (when)
+import Data.Foldable (for_)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -234,6 +236,20 @@ toRecordFields = \case
   unRight (Left (RecordPun (Ident tok _ _))) = parseFail tok ErrRecordPunInUpdate
   unRight (Left (RecordField _ tok _)) = parseFail tok ErrRecordCtrInUpdate
 
+checkFundeps :: ClassHead a -> Parser ()
+checkFundeps (ClassHead _ _ _ _ Nothing) = pure ()
+checkFundeps (ClassHead _ _ _ vars (Just (_, fundeps))) = do
+  let
+    k (TypeVarKinded (Wrapped _ (Labeled a _ _) _)) = identName a
+    k (TypeVarName a) = identName a
+    names = k <$> vars
+    check a
+      | identName a `elem` names = pure ()
+      | otherwise = addFailure [identTok a] ErrUnknownFundep
+  for_ fundeps $ \(ClassFundep as _ bs) -> do
+    for_ as check
+    for_ bs check
+
 data TmpModuleDecl a
   = TmpImport (ImportDecl a)
   | TmpDecl (Declaration a)
@@ -247,7 +263,9 @@ toModuleDecls = goImport []
 
   goDecl acc [] = pure $ reverse acc
   goDecl acc (TmpDecl x : xs) = goDecl (x : acc) xs
-  goDecl (DeclInstanceChain a (Separated h t) : acc) (TmpChain tok (DeclInstanceChain a' (Separated h' t')) : xs) =
+  goDecl (DeclInstanceChain a (Separated h t) : acc) (TmpChain tok (DeclInstanceChain a' (Separated h' t')) : xs) = do
+    let getName = instName . instHead
+    when (getName h == getName h') $ addFailure [identTok $ getName h'] ErrInstanceNameMismatch
     goDecl (DeclInstanceChain (a <> a') (Separated h (t <> ((tok, h') : t'))) : acc) xs
   goDecl _ (TmpChain tok _ : _) = parseFail tok ErrElseInDecl
   goDecl _ (TmpImport imp : _) = parseFail (impKeyword imp) ErrImportInDecl

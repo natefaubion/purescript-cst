@@ -303,7 +303,14 @@ expr2 :: { Expr () }
 
 expr3 :: { Expr () }
   : expr4 { $1 }
-  | expr3 expr4 { ExprApp () $1 $2 }
+  | expr3 expr4
+      { case $2 of
+          -- Record application/updates can introduce function applications
+          -- associated to right, so we need to correct it.
+          ExprApp _ lhs rhs ->
+            ExprApp () (ExprApp () $1 lhs) rhs
+          _ -> ExprApp () $1 $2
+      }
 
 expr4 :: { Expr () }
   : expr5 { $1 }
@@ -449,9 +456,9 @@ decl :: { Declaration () }
   | dataHead '=' sep(dataCtor, '|') { DeclData () $1 (Just ($2, $3)) }
   | typeHead '=' type { DeclType () $1 $2 $3 }
   | newtypeHead '=' properIdent typeAtom { DeclNewtype () $1 $2 $3 $4 }
-  | classHead { DeclClass () $1 Nothing }
+  | classHead {% do checkFundeps $1; pure $ DeclClass () $1 Nothing }
   | classHead 'where' '\{' manySep(classMember, '\;') '\}'
-      { DeclClass () $1 (Just ($2, $4)) }
+      {% do checkFundeps $1; pure $ DeclClass () $1 (Just ($2, $4)) }
   | instHead { DeclInstanceChain () (Separated (Instance $1 Nothing) []) }
   | instHead 'where' '\{' manySep(instBinding, '\;') '\}'
       { DeclInstanceChain () (Separated (Instance $1 (Just ($2, $4))) []) }
@@ -474,7 +481,7 @@ newtypeHead :: { DataHead () }
   : 'newtype' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
 dataCtor :: { DataCtor () }
-  : properIdent manyOrEmpty(type) { DataCtor () $1 $2 }
+  : properIdent manyOrEmpty(typeAtom) { DataCtor () $1 $2 }
 
 classHead :: { ClassHead () }
   : 'class' classNameAndVars fundeps { ClassHead $1 Nothing (fst $2) (snd $2) $3 }
@@ -482,7 +489,7 @@ classHead :: { ClassHead () }
   -- the class name and vars and constraint syntax.
   | 'class' classNameAndVars '<=' classNameAndVars fundeps
       { ClassHead $1
-          (Just (One (foldl' (TypeApp ()) (TypeVar () (fst $2)) (fmap varToType (snd $2))), $3))
+          (Just (One (foldl' (TypeApp ()) (TypeConstructor () (fst $2)) (fmap varToType (snd $2))), $3))
           (fst $4)
           (snd $4)
           $5 }

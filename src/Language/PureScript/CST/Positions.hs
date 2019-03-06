@@ -112,11 +112,34 @@ moduleRange (Module { modKeyword, modWhere, modImports, modDecls }) =
     (is, []) -> (modKeyword, snd . importDeclRange $ last is)
     (_,  ds) -> (modKeyword, snd . declRange $ last ds)
 
+exportRange :: Export a -> TokenRange
+exportRange = \case
+  ExportValue _ a -> identRange a
+  ExportOp _ a -> wrappedRange a
+  ExportType _ a b
+    | Just (Wrapped _ _ b') <- b -> (identTok a, b')
+    | otherwise -> identRange a
+  ExportTypeOp _ a (Wrapped _ _ b) -> (a, b)
+  ExportClass _ a b -> (a, identTok b)
+  ExportKind _ a b -> (a, identTok b)
+  ExportModule _ a b -> (a, identTok b)
+
 importDeclRange :: ImportDecl a -> TokenRange
 importDeclRange (ImportDecl { impKeyword, impModule, impNames, impQual })
   | Just (_, ident) <- impQual = (impKeyword, identTok ident)
   | Just (_, imports) <- impNames = (impKeyword, wrpClose imports)
   | otherwise = (impKeyword, identTok impModule)
+
+importRange :: Import a -> TokenRange
+importRange = \case
+  ImportValue _ a -> identRange a
+  ImportOp _ a -> wrappedRange a
+  ImportType _ a b
+    | Just (Wrapped _ _ b') <- b -> (identTok a, b')
+    | otherwise -> identRange a
+  ImportTypeOp _ a (Wrapped _ _ b) -> (a, b)
+  ImportClass _ a b -> (a, identTok b)
+  ImportKind _ a b -> (a, identTok b)
 
 declRange :: Declaration a -> TokenRange
 declRange = \case

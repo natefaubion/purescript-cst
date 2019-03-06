@@ -22,6 +22,8 @@ data ParserErrorType
   | ErrRecordPunInUpdate
   | ErrRecordCtrInUpdate
   | ErrElseInDecl
+  | ErrInstanceNameMismatch
+  | ErrUnknownFundep
   | ErrImportInDecl
   | ErrGuardInLetBinder
   | ErrKeywordVar
@@ -146,6 +148,10 @@ prettyPrintError (ParserError {..}) =
       "Expected '=', saw ':'"
     ErrElseInDecl ->
       "Expected declaration, saw 'else'"
+    ErrInstanceNameMismatch ->
+      "All instances in a chain must implement the same type class"
+    ErrUnknownFundep ->
+      "Unknown type variable in functional dependency"
     ErrImportInDecl ->
       "Expected declaration, saw 'import'"
     ErrGuardInLetBinder ->

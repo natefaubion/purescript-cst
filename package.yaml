@@ -79,6 +79,8 @@ dependencies:
 - containers
 - array
 - pretty-simple
+- Glob
+- async
 
 library:
   source-dirs: src
