@@ -5,6 +5,8 @@ import Control.Concurrent.Async (forConcurrently)
 import Control.Concurrent.MVar
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import Criterion.Main (runMode, bgroup, whnf, bench)
+import Criterion.Main.Options (Mode(..), MatchType(..), defaultConfig)
 import Data.Foldable (for_, foldl', find)
 import qualified Data.Text.IO as IO
 import qualified Language.PureScript.CST.Convert as CST
@@ -18,7 +20,7 @@ import qualified Language.PureScript.Names as Names
 import qualified Language.PureScript.Parser.Declarations as Parser
 import Language.PureScript.Options (defaultOptions)
 import System.Environment (getArgs)
-import System.Exit (die, exitFailure)
+import System.Exit (die, exitFailure, exitSuccess)
 import System.FilePath.Glob (glob)
 import System.IO
 import Text.Pretty.Simple (pPrint)
@@ -46,12 +48,25 @@ main = do
       when (null paths) $ die "Glob did not match any files."
       pure paths
 
+  when ("--bench" `elem` args) $ do
+    srcs <- traverse (\a -> (a,) <$> IO.readFile a) $ take 5 filePaths
+    let
+      mkCstBench (path, src) =
+        bench path $ whnf (fmap (CST.convertModule path) . CST.parse) src
+      mkPscBench arg =
+        bench (fst arg) $ whnf (Parser.parseModuleFromFile id) arg
+    runMode (Run defaultConfig Pattern ["purescript"])
+      [ bgroup "purescript-cst" $ mkCstBench <$> srcs
+      , bgroup "purescript" $ mkPscBench <$> srcs
+      ]
+    exitSuccess
+
   mbModules <- forConcurrently filePaths $ \path -> do
     src <- IO.readFile path
     let
       cst = CST.parse src
       res = (\a -> (path, src, a, CST.convertModule path a)) <$> cst
-    pure (path, src, res)
+    pure $ (path, src,) $! res
 
   let
     modules = foldl' go id mbModules $ Right []
