@@ -70,6 +70,7 @@ moduleName :: Token -> Maybe N.ModuleName
 moduleName = \case
   TokLowerName as _ -> go as
   TokUpperName as _ -> go as
+  TokSymbol as _ -> go as
   _ -> Nothing
   where
   go [] = Nothing
