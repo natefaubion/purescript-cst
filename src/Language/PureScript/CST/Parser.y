@@ -304,9 +304,9 @@ expr2 :: { Expr () }
 expr3 :: { Expr () }
   : expr4 { $1 }
   | expr3 expr4
-      { case $2 of
-          -- Record application/updates can introduce function applications
-          -- associated to right, so we need to correct it.
+      { -- Record application/updates can introduce a function application
+        -- associated to the right, so we need to correct it.
+        case $2 of
           ExprApp _ lhs rhs ->
             ExprApp () (ExprApp () $1 lhs) rhs
           _ -> ExprApp () $1 $2
@@ -330,14 +330,17 @@ expr4 :: { Expr () }
       {% do bs <- traverse toBinder $5; pure $ ExprCase () (CaseOf $1 $2 $3 [(bs, $7)]) }
 
 expr5 :: { Expr () }
-  : exprAtom { $1 }
-  | exprAtom '.' sep(label, '.') { ExprRecordAccessor () (RecordAccessor $1 $2 $3) }
-  | expr5 '{' '}' { ExprApp () $1 (ExprRecord () (Wrapped $2 Nothing $3)) }
-  | expr5 '{' sep(recordUpdateOrLabel, ',') '}'
+  : expr6 { $1 }
+  | expr6 '{' '}' { ExprApp () $1 (ExprRecord () (Wrapped $2 Nothing $3)) }
+  | expr6 '{' sep(recordUpdateOrLabel, ',') '}'
       {% toRecordFields $3 >>= \case
           Left xs -> pure $ ExprApp () $1 (ExprRecord () (Wrapped $2 (Just xs) $4))
           Right xs -> pure $ ExprRecordUpdate () $1 (Wrapped $2 xs $4)
       }
+
+expr6 :: { Expr () }
+  : exprAtom { $1 }
+  | exprAtom '.' sep(label, '.') { ExprRecordAccessor () (RecordAccessor $1 $2 $3) }
 
 exprAtom :: { Expr () }
   : '_' { ExprSection () $1 }
