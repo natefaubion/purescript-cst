@@ -241,6 +241,7 @@ token = P.choice
   , P.try $ P.label "raw string" $ TokRawString <$> rawStringLiteral
   , P.label "string" $ uncurry TokString <$> stringLiteral
   , P.try $ P.label "number" $ uncurry TokNumber <$> numberLiteral
+  , P.try $ P.label "hex" $ uncurry TokInt <$> hexLiteral
   , P.label "integer" $ uncurry TokInt <$> intLiteral
   ]
 
@@ -314,6 +315,9 @@ rawStringLiteral = delimiter *> go mempty
 
 intLiteral :: Lexer e m => m (Text, Integer)
 intLiteral = P.match P.decimal
+
+hexLiteral :: Lexer e m => m (Text, Integer)
+hexLiteral = P.match $ P.string "0x" *> P.hexadecimal
 
 numberLiteral :: Lexer e m => m (Text, Double)
 numberLiteral = P.match P.float
