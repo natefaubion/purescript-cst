@@ -3,7 +3,7 @@ module Language.PureScript.CST.Lexer where
 import Prelude
 
 import Control.Applicative ((<|>))
-import Data.Char (isAscii, isSymbol)
+import Data.Char (isAscii, isSymbol, isHexDigit, digitToInt, chr)
 import Data.DList (DList, snoc)
 import qualified Data.DList as DList
 import qualified Data.List.NonEmpty as NonEmpty
@@ -238,7 +238,7 @@ token = P.choice
   , P.label "hole" $ P.try $ TokHole <$> (P.char '?' *> lname)
   , P.label "identifier" identifier
   , P.label "character" $ uncurry TokChar <$> charLiteral
-  , P.try $ P.label "raw string" $ TokRawString <$> rawStringLiteral
+  , P.label "raw string" $ TokRawString <$> rawStringLiteral
   , P.label "string" $ uncurry TokString <$> stringLiteral
   , P.try $ P.label "number" $ uncurry TokNumber <$> numberLiteral
   , P.try $ P.label "hex" $ uncurry TokInt <$> hexLiteral
@@ -291,27 +291,67 @@ notElemText c = not . Text.any (== c)
 
 charLiteral :: Lexer e m => m (Text, Char)
 charLiteral = do
-  (raw, ch) <- P.char '\'' *> P.match P.charLiteral <* P.char '\''
+  (raw, ch) <- P.char '\'' *> P.match (charUnit (/= '\'')) <* P.char '\''
   if fromEnum ch > 0xFFFF
     then fail "astral code point in character literal; characters must be valid UTF-16 code units"
     else pure (raw, ch)
 
+charUnit :: Lexer e m => (Char -> Bool) -> m Char
+charUnit p = do
+  ch <- P.satisfy p
+  case ch of
+    '\\' -> charEscape
+    _    -> pure ch
+
+charEscape :: forall e m. Lexer e m => m Char
+charEscape = P.label "character escape sequence" $ do
+  esc <- P.anySingle
+  case esc of
+    't'  -> pure '\t'
+    'r'  -> pure '\r'
+    'n'  -> pure '\n'
+    '"'  -> pure '"'
+    '\'' -> pure '\''
+    '\\' -> pure '\\'
+    'x'  -> parseHex 0 0
+    _    -> P.empty
+  where
+  parseHex :: Int -> Int -> m Char
+  parseHex n acc
+    | n >= 4 = pure $ chr acc
+    | otherwise = do
+        ch <- P.optional $ P.satisfy isHexDigit
+        case ch of
+          Nothing  -> pure $ chr acc
+          Just ch' -> parseHex (n + 1) (acc * 16 + digitToInt ch')
+
 stringLiteral :: Lexer e m => m (Text, Text)
-stringLiteral = do
-  (raw, str) <- P.char '"' *> P.match (P.manyTill P.charLiteral (P.lookAhead (P.char '"'))) <* P.char '"'
-  pure (raw, Text.pack str)
+stringLiteral = P.char '"' *> go "" ""
+  where
+  go raw acc = do
+    chs <- P.takeWhileP Nothing (\c -> c /= '"' && c /= '\\' && c /= '\r' && c /= '\n')
+    ch  <- P.anySingle
+    case ch of
+      '"'  -> pure (raw <> chs, acc <> chs)
+      '\\' -> P.choice
+        [ P.try (P.match gap) >>= \(raw', _) -> go (raw <> chs <> Text.singleton ch <> raw') acc
+        , P.match charEscape >>= \(raw', esc) -> go (raw <> chs <> Text.singleton ch <> raw') (acc <> chs <> Text.singleton esc)
+        ]
+      _ -> fail "Unexpected line feed"
+
+  gap = do
+    _ <- P.takeWhile1P (Just "string gap") (\c -> c == ' ' || c == '\r' || c == '\n')
+    P.char '\\'
 
 rawStringLiteral :: forall e m. Lexer e m => m Text
-rawStringLiteral = delimiter *> go mempty
+rawStringLiteral = P.string "\"\"\"" *> go mempty
   where
-  delimiter =
-    P.string "\"\"\""
-
   go acc = do
-    chs <- P.takeWhileP Nothing (\c -> c /= '"')
-    let acc' = acc <> chs
-    (delimiter *> pure acc')
-      <|> (go . (acc' <>) =<< P.takeP Nothing 3)
+    chs <- P.takeWhileP Nothing (/= '"')
+    quotes <- P.takeWhile1P Nothing (== '"')
+    if Text.length quotes >= 3
+      then pure $ acc <> chs <> Text.dropEnd 3 quotes
+      else go $ acc <> chs <> quotes
 
 intLiteral :: Lexer e m => m (Text, Integer)
 intLiteral = P.match P.decimal
