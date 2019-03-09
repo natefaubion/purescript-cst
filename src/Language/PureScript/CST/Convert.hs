@@ -164,13 +164,17 @@ convertType fileName = go
         ann = sourceAnnCommented fileName a b
         annRec = sourceAnn fileName a a
       T.TypeApp ann (Env.tyRecord $> annRec) $ goRow row b
-    TypeForall _ _ bindings _ ty -> do
+    TypeForall _ kw bindings _ ty -> do
       let
-        mkForAll a t = T.ForAll (sourceIdent fileName a) (identName a) t Nothing
+        mkForAll a t = do
+          let ann' = widenLeft (fst $ identTok a) $ T.getAnnForType t
+          T.ForAll ann' (identName a) t Nothing
         -- TODO: fix forall in the compiler
         k (TypeVarKinded (Wrapped _ (Labeled a _ _) _)) = mkForAll a
         k (TypeVarName a) = mkForAll a
-      foldr k (go ty) bindings
+        ty' = foldr k (go ty) bindings
+        ann = widenLeft (fst kw) $ T.getAnnForType ty'
+      T.setAnnForType ann ty'
     TypeKinded _ ty _ kd -> do
       let
         ty' = go ty
