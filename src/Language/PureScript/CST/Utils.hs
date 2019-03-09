@@ -9,6 +9,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Traversable (for)
 import Language.PureScript.CST.Monad
+import Language.PureScript.CST.Traversals.Type
 import Language.PureScript.CST.Types
 
 placeholder :: SourceToken
@@ -293,6 +294,15 @@ toLetBinding lhs guarded = do
           parseFail (grdBar g) ErrGuardInLetBinder
         Guarded _ ->
           internalError "Empty guard set"
+
+checkNoWildcards :: Type a -> Parser ()
+checkNoWildcards ty = do
+  let
+    k = \case
+      TypeWildcard _ a -> [addFailure [a] ErrWildcardInType]
+      TypeHole _ a -> [addFailure [identTok a] ErrHoleInType]
+      _ -> []
+  sequence_ $ everythingOnTypes (<>) k ty
 
 reservedNames :: Set Text
 reservedNames = Set.fromList

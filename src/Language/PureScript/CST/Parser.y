@@ -9,7 +9,7 @@ module Language.PureScript.CST.Parser
 
 import Prelude
 
-import Data.Foldable (foldl')
+import Data.Foldable (foldl', for_)
 import Data.Text (Text)
 import Language.PureScript.CST.Lexer
 import Language.PureScript.CST.Monad
@@ -457,8 +457,8 @@ import :: { Import () }
 decl :: { Declaration () }
   : dataHead { DeclData () $1 Nothing }
   | dataHead '=' sep(dataCtor, '|') { DeclData () $1 (Just ($2, $3)) }
-  | typeHead '=' type { DeclType () $1 $2 $3 }
-  | newtypeHead '=' properIdent typeAtom { DeclNewtype () $1 $2 $3 $4 }
+  | typeHead '=' type {% do checkNoWildcards $3; pure (DeclType () $1 $2 $3) }
+  | newtypeHead '=' properIdent typeAtom {% do checkNoWildcards $4; pure (DeclNewtype () $1 $2 $3 $4) }
   | classHead {% do checkFundeps $1; pure $ DeclClass () $1 Nothing }
   | classHead 'where' '\{' manySep(classMember, '\;') '\}'
       {% do checkFundeps $1; pure $ DeclClass () $1 (Just ($2, $4)) }
@@ -484,7 +484,8 @@ newtypeHead :: { DataHead () }
   : 'newtype' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
 dataCtor :: { DataCtor () }
-  : properIdent manyOrEmpty(typeAtom) { DataCtor () $1 $2 }
+  : properIdent manyOrEmpty(typeAtom)
+      {% do for_ $2 checkNoWildcards; pure (DataCtor () $1 $2) }
 
 classHead :: { ClassHead () }
   : 'class' classNameAndVars fundeps { ClassHead $1 Nothing (fst $2) (snd $2) $3 }
@@ -511,7 +512,7 @@ fundep :: { ClassFundep }
   | many(ident) '->' many(ident) { ClassFundep $1 $2 $3 }
 
 classMember :: { Labeled (Type ()) }
-  : ident '::' type { Labeled $1 $2 $3 }
+  : ident '::' type {% do checkNoWildcards $3; pure (Labeled $1 $2 $3) }
 
 instHead :: { InstanceHead () }
   : 'instance' ident '::' constraints '=>' properIdent manyOrEmpty(typeAtom)
@@ -525,7 +526,8 @@ constraints :: { OneOrDelimited (Type ()) }
 
 constraint :: { Type () }
   : properIdent { TypeConstructor () $1 }
-  | properIdent many(typeAtom) { foldl' (TypeApp ()) (TypeConstructor () $1) $2 }
+  | properIdent many(typeAtom)
+      {% do for_ $2 checkNoWildcards; pure (foldl' (TypeApp ()) (TypeConstructor () $1) $2) }
 
 instBinding :: { InstanceBinding () }
   : ident '::' type { InstanceBindingSignature () (Labeled $1 $2 $3) }
