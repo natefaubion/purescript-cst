@@ -13,8 +13,6 @@ import qualified Text.Megaparsec as P
 data ParserErrorType
   = ErrExpr
   | ErrDecl
-  | ErrWildcardInType
-  | ErrHoleInType
   | ErrExprInLabel
   | ErrExprInBinder
   | ErrExprInDeclOrBinder
@@ -135,10 +133,6 @@ prettyPrintError (ParserError {..}) =
   errMsg <> " at " <> errPos
   where
   errMsg = case errType of
-    ErrWildcardInType ->
-      "Unexpected wildcard in type; wildcards are only allowed in value annotations"
-    ErrHoleInType ->
-      "Unexpected hole in type; holes are only allowed in value annotations"
     ErrExprInLabel ->
       "Expected labeled expression or pun, saw expression"
     ErrExprInBinder ->

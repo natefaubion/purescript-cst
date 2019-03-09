@@ -18,7 +18,7 @@ import Language.PureScript.CST.Utils
 }
 
 %name parseKind kind
-%name parseType typeWithWildcards
+%name parseType type
 %name parseExpr expr
 %name parseModule module
 %tokentype { SourceToken }
@@ -221,51 +221,53 @@ kind0 :: { Kind () }
   | '#' kind0 { KindRow () $1 $2 }
   | '(' kind ')' { KindParens () (Wrapped $1 $2 $3) }
 
-type(w) :: { Type () }
-  : type0(w) { $1 }
-  | forall many(typeVarBinding) '.' type(w) { TypeForall () $1 $2 $3 $4 }
+type :: { Type () }
+  : type0 { $1 }
+  | forall many(typeVarBinding) '.' type { TypeForall () $1 $2 $3 $4 }
 
-type0(w) :: { Type () }
-  : type1(w) { $1 }
-  | type1(w) '->' type(w) { TypeArr () $1 $2 $3 }
-  | type1(w) '=>' type(w) { TypeConstrained () $1 $2 $3 }
+type0 :: { Type () }
+  : type1 { $1 }
+  | type1 '->' type { TypeArr () $1 $2 $3 }
+  | type1 '=>' type { TypeConstrained () $1 $2 $3 }
 
-type1(w) :: { Type () }
-  : type2(w) { $1 }
-  | type1(w) symbol type2(w) { TypeOp () $1 $2 $3 }
+type1 :: { Type () }
+  : type2 { $1 }
+  | type1 symbol type2 { TypeOp () $1 $2 $3 }
 
-type2(w) :: { Type () }
-  : typeAtom(w) { $1 }
-  | type2(w) typeAtom(w) { TypeApp () $1 $2 }
+type2 :: { Type () }
+  : typeAtom { $1 }
+  | type2 typeAtom { TypeApp () $1 $2 }
 
-typeAtom(w) :: { Type ()}
-  : w { $1 }
+typeAtom :: { Type ()}
+  : '_' { TypeWildcard () $1 }
   | var { TypeVar () $1 }
   | properIdent { TypeConstructor () $1 }
   | string { uncurry (TypeString ()) $1 }
-  | '{' row(w) '}' { TypeRecord () (Wrapped $1 $2 $3) }
-  | '(' row(w) ')' { TypeRow () (Wrapped $1 $2 $3) }
+  | hole { TypeHole () $1 }
+  | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
+  | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
   | '(' '->' ')' { TypeArrName () (Wrapped $1 $2 $3) }
   | '(' symbol ')' { TypeOpName () (Wrapped $1 $2 $3) }
-  | '(' type(w) ')' { TypeParens () (Wrapped $1 $2 $3) }
-  | '(' typeKindedAtom(w) '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
+  | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
+  | '(' typeKindedAtom '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
 
-typeKindedAtom(w) :: { Type () }
-  : w { $1 }
+typeKindedAtom :: { Type () }
+  : '_' { TypeWildcard () $1 }
   | properIdent { TypeConstructor () $1 }
-  | '{' row(w) '}' { TypeRecord () (Wrapped $1 $2 $3) }
-  | '(' row(w) ')' { TypeRow () (Wrapped $1 $2 $3) }
-  | '(' type(w) ')' { TypeParens () (Wrapped $1 $2 $3) }
-  | '(' typeKindedAtom(w) '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
+  | hole { TypeHole () $1 }
+  | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
+  | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
+  | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
+  | '(' typeKindedAtom '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
 
-row(w) :: { Row () }
+row :: { Row () }
   : {- empty -} { Row Nothing Nothing }
-  | '|' type(w) { Row Nothing (Just ($1, $2)) }
-  | sep(rowLabel(w), ',') { Row (Just $1) Nothing }
-  | sep(rowLabel(w), ',') '|' type(w) { Row (Just $1) (Just ($2, $3)) }
+  | '|' type { Row Nothing (Just ($1, $2)) }
+  | sep(rowLabel, ',') { Row (Just $1) Nothing }
+  | sep(rowLabel, ',') '|' type { Row (Just $1) (Just ($2, $3)) }
 
-rowLabel(w) :: { Labeled (Type ()) }
-  : label '::' type(w) { Labeled $1 $2 $3 }
+rowLabel :: { Labeled (Type ()) }
+  : label '::' type { Labeled $1 $2 $3 }
 
 typeVarBinding :: { TypeVarBinding () }
   : var { TypeVarName $1 }
@@ -275,25 +277,13 @@ forall :: { SourceToken }
   : 'forall' { $1 }
   | 'forallu' { $1 }
 
-withWildcards :: { Type () }
-  : '_' { TypeWildcard () $1 }
-  | hole { TypeHole () $1 }
-
-withNoWildcards :: { Type () }
-  : '_' {% do addFailure [$1] ErrWildcardInType; pure (TypeWildcard () $1) }
-  | hole {% do addFailure [identTok $1] ErrHoleInType; pure (TypeHole () $1) }
-
--- For export
-typeWithWildcards :: { Type () }
-  : type(withWildcards) { $1 }
-
 exprWhere :: { Expr () }
   : expr { $1 }
   | expr 'where' '\{' manySep(letBinding, '\;') '\}' { ExprWhere () (Where $1 $2 $4) }
 
 expr :: { Expr () }
   : expr0 { $1 }
-  | expr0 '::' type(withWildcards) { ExprTyped () $1 $2 $3 }
+  | expr0 '::' type { ExprTyped () $1 $2 $3 }
 
 expr0 :: { Expr () }
   : expr1 { $1 }
@@ -390,7 +380,7 @@ recordUpdate :: { RecordUpdate () }
   | label '{' sep(recordUpdate, ',') '}' { RecordUpdateBranch $1 (Wrapped $2 $3 $4) }
 
 letBinding :: { LetBinding () }
-  : var '::' type(withWildcards) { LetBindingSignature () (Labeled $1 $2 $3) }
+  : var '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
   | expr0 guarded('=') {% toLetBinding $1 $2 }
   | expr0 {%% recover ErrLetBinding (unexpectedLetBinding . (exprToken $1 :)) }
 
@@ -467,8 +457,8 @@ import :: { Import () }
 decl :: { Declaration () }
   : dataHead { DeclData () $1 Nothing }
   | dataHead '=' sep(dataCtor, '|') { DeclData () $1 (Just ($2, $3)) }
-  | typeHead '=' type(withNoWildcards) { DeclType () $1 $2 $3 }
-  | newtypeHead '=' properIdent typeAtom(withNoWildcards) { DeclNewtype () $1 $2 $3 $4 }
+  | typeHead '=' type { DeclType () $1 $2 $3 }
+  | newtypeHead '=' properIdent typeAtom { DeclNewtype () $1 $2 $3 $4 }
   | classHead {% do checkFundeps $1; pure $ DeclClass () $1 Nothing }
   | classHead 'where' '\{' manySep(classMember, '\;') '\}'
       {% do checkFundeps $1; pure $ DeclClass () $1 (Just ($2, $4)) }
@@ -477,7 +467,7 @@ decl :: { Declaration () }
       { DeclInstanceChain () (Separated (Instance $1 (Just ($2, $4))) []) }
   | 'derive' instHead { DeclDerive () $1 Nothing $2 }
   | 'derive' 'newtype' instHead { DeclDerive () $1 (Just $2) $3 }
-  | ident '::' type(withWildcards) { DeclSignature () (Labeled $1 $2 $3) }
+  | ident '::' type { DeclSignature () (Labeled $1 $2 $3) }
   | expr0 guarded('=') {% toDecl DeclValue unexpectedDecl $1 $2 }
   | fixity { DeclFixity () $1 }
   | 'foreign' 'import' foreign { DeclForeign () $1 $2 $3 }
@@ -494,7 +484,7 @@ newtypeHead :: { DataHead () }
   : 'newtype' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
 dataCtor :: { DataCtor () }
-  : properIdent manyOrEmpty(typeAtom(withNoWildcards)) { DataCtor () $1 $2 }
+  : properIdent manyOrEmpty(typeAtom) { DataCtor () $1 $2 }
 
 classHead :: { ClassHead () }
   : 'class' classNameAndVars fundeps { ClassHead $1 Nothing (fst $2) (snd $2) $3 }
@@ -521,12 +511,12 @@ fundep :: { ClassFundep }
   | many(ident) '->' many(ident) { ClassFundep $1 $2 $3 }
 
 classMember :: { Labeled (Type ()) }
-  : ident '::' type(withNoWildcards) { Labeled $1 $2 $3 }
+  : ident '::' type { Labeled $1 $2 $3 }
 
 instHead :: { InstanceHead () }
-  : 'instance' ident '::' constraints '=>' properIdent manyOrEmpty(typeAtom(withNoWildcards))
+  : 'instance' ident '::' constraints '=>' properIdent manyOrEmpty(typeAtom)
       { InstanceHead $1 $2 $3 (Just ($4, $5)) $6 $7 }
-  | 'instance' ident '::' properIdent manyOrEmpty(typeAtom(withNoWildcards))
+  | 'instance' ident '::' properIdent manyOrEmpty(typeAtom)
       { InstanceHead $1 $2 $3 Nothing $4 $5 }
 
 constraints :: { OneOrDelimited (Type ()) }
@@ -535,10 +525,10 @@ constraints :: { OneOrDelimited (Type ()) }
 
 constraint :: { Type () }
   : properIdent { TypeConstructor () $1 }
-  | properIdent many(typeAtom(withNoWildcards)) { foldl' (TypeApp ()) (TypeConstructor () $1) $2 }
+  | properIdent many(typeAtom) { foldl' (TypeApp ()) (TypeConstructor () $1) $2 }
 
 instBinding :: { InstanceBinding () }
-  : ident '::' type(withNoWildcards) { InstanceBindingSignature () (Labeled $1 $2 $3) }
+  : ident '::' type { InstanceBindingSignature () (Labeled $1 $2 $3) }
   | expr0 guarded('=') {% toDecl InstanceBindingName unexpectedInstBinding $1 $2 }
 
 fixity :: { FixityFields () }
@@ -552,7 +542,7 @@ infix :: { SourceToken }
   | 'infixr' { $1 }
 
 foreign :: { Foreign () }
-  : ident '::' type(withNoWildcards) { ForeignValue (Labeled $1 $2 $3) }
+  : ident '::' type { ForeignValue (Labeled $1 $2 $3) }
   | 'data' properIdent '::' kind { ForeignData $1 (Labeled $2 $3 $4) }
   | 'kind' properIdent { ForeignKind $1 $2 }
 
