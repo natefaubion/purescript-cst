@@ -7,6 +7,7 @@ import Data.Char (isAscii, isSymbol, isHexDigit, digitToInt, chr)
 import Data.DList (DList, snoc)
 import qualified Data.DList as DList
 import qualified Data.List.NonEmpty as NonEmpty
+import Data.Functor (($>))
 import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Void (Void, absurd)
@@ -15,12 +16,11 @@ import Language.PureScript.CST.Layout
 import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Types
-import Text.Megaparsec (MonadParsec)
 import qualified Text.Megaparsec as P
 import qualified Text.Megaparsec.Char as P
 import qualified Text.Megaparsec.Char.Lexer as P
 
-type Lexer e m = MonadParsec e Text m
+type Lexer = P.Parsec ParserErrorType Text
 
 initialParserState :: Text -> ParserState
 initialParserState src =
@@ -44,7 +44,7 @@ initialParserState src =
         , parserErrors = []
         }
   where
-  leadingP :: P.Parsec Void Text [Comment LineFeed]
+  leadingP :: P.Parsec ParserErrorType Text [Comment LineFeed]
   leadingP = uncurry (<>) <$> breakComments
 
   initialState :: P.State Text
@@ -148,65 +148,100 @@ munch = Parser $ \state@(ParserState {..}) kerr ksucc ->
               , parserStack = parserStack'
               }
           ksucc state' (head toks)
-        (_, Left err) -> do
-          let range = SourceRange parserPos (applyDelta parserPos (0, 1))
-          kerr state $ convertErr range parserStack err
+        (_, Left bundle) ->
+          kerr state
+            . convertErr parserStack
+            . fst
+            . P.attachSourcePos P.errorOffset (P.bundleErrors bundle)
+            $ P.bundlePosState bundle
   where
-  munchP :: forall void. P.Parsec Void Text (Token, ([Comment void], [Comment LineFeed]))
+  munchP :: forall void. P.Parsec ParserErrorType Text (Token, ([Comment void], [Comment LineFeed]))
   munchP =
     (,) <$> token <*> breakComments
         <|> (TokEof, ([], [])) <$ P.eof
 
-  convertErr pos stk bundle =
-    case NonEmpty.head $ P.bundleErrors bundle of
-      P.TrivialError _ err alts -> do
-        ParserError pos [] stk $ ErrLexeme (printErrorItem <$> err) (printErrorItem <$> Set.toList alts)
-      P.FancyError _ _ ->
-        ParserError pos [] stk $ ErrEof
+  convertErr stk errs =
+    case NonEmpty.head errs of
+      (P.TrivialError _ err alts, pos) -> do
+        let alts' = convertAlts alts
+        ParserError (convertPos pos) [] stk $ maybe (ErrLexeme Nothing alts') (convertTrivialError alts') err
+      (P.FancyError _ err, pos) ->
+        ParserError (convertPos pos) [] stk . convertFancyError . head $ Set.toList err
+
+  convertFancyError = \case
+    P.ErrorFail err -> ErrLexeme (Just err) []
+    P.ErrorIndentation _ _ _ -> ErrLexeme (Just "indentation") []
+    P.ErrorCustom err -> err
+
+  convertPos pos = do
+    let pos' = SourcePos (P.unPos $ P.sourceLine pos) (P.unPos $ P.sourceColumn pos)
+    SourceRange pos' $ applyDelta pos' (0, 1)
+
+  convertTrivialError alts = \case
+    P.Tokens cs -> ErrLexeme (Just $ show $ NonEmpty.toList cs) alts
+    P.Label cs -> ErrLexeme (Just $ NonEmpty.toList cs) []
+    P.EndOfInput -> ErrEof
+
+  convertAlts =
+    map printErrorItem . Set.toList
 
   printErrorItem = \case
-    P.Tokens cs -> NonEmpty.toList cs
+    P.Tokens cs -> show $ NonEmpty.toList cs
     P.Label cs -> NonEmpty.toList cs
     P.EndOfInput -> "end of input"
 
-space :: Lexer e m => m Int
+space :: Lexer Int
 space = Text.length <$> P.takeWhile1P (Just "space") (== ' ')
 
-line :: Lexer e m => m LineFeed
+line :: Lexer LineFeed
 line = CRLF <$ P.crlf <|> LF <$ P.newline
 
-lineComment :: Lexer e m => m Text
+lineComment :: Lexer Text
 lineComment = do
-  pre <- P.chunk "--"
-  (pre <>) . Text.pack <$> P.manyTill P.anySingle (P.lookAhead line)
+  chs <- P.string "--"
+  (chs <>) <$> P.takeWhileP Nothing (\c -> c /= '\r' && c /= '\n')
 
-blockComment :: Lexer e m => m Text
-blockComment = do
-  text <- P.chunk "{-" *> P.manyTill P.anySingle (P.chunk "-}")
-  pure $ Text.pack ("{-" <> text <> "-}")
+blockComment :: Lexer Text
+blockComment = P.string "{-" >>= go
+  where
+  go acc = do
+    chs <- P.takeWhileP Nothing (/= '-')
+    dashes <- P.takeWhileP Nothing (== '-')
+    end <- P.optional (P.char '}')
+    let acc' = acc <> chs <> dashes
+    case end of
+      Just end'
+        | not (Text.null dashes) ->
+            pure $ acc' <> Text.singleton end'
+        | otherwise ->
+            go $ acc' <> Text.singleton end'
+      Nothing -> do
+        isEof <- P.atEnd
+        if isEof
+          then pure acc'
+          else go acc'
 
-trailingComment :: Lexer e m => m (Comment void)
-trailingComment = P.choice
-  [ Space <$> space
-  , Comment <$> (lineComment <|> blockComment)
-  ]
+trailingComment :: Lexer (Comment void)
+trailingComment =
+  Space <$> space
+    <|> Comment <$> (lineComment <|> blockComment)
 
-breakComments :: Lexer e m => m ([Comment void], [Comment LineFeed])
+breakComments :: Lexer ([Comment void], [Comment LineFeed])
 breakComments = go (mempty :: DList (Comment Void))
   where
   go ts = do
-    isLine <- True <$ P.lookAhead line <|> pure False
-    if isLine
-      then do
+    ln <- P.optional line
+    case ln of
+      Just ln' -> do
         ls <- P.many (Line <$> line <|> trailingComment)
-        pure (fmap absurd <$> DList.toList ts, ls)
-      else do
-        mbT <- P.optional trailingComment
-        case mbT of
-          Nothing -> pure ([], fmap absurd <$> DList.toList ts)
-          Just t -> go (ts `snoc` t)
+        pure (fmap absurd <$> DList.toList ts, Line ln' : ls)
+      Nothing -> do
+        cs <- P.many trailingComment
+        case cs of
+          [] -> pure ([], fmap absurd <$> DList.toList ts)
+          _  -> go (ts <> DList.fromList cs)
 
-token :: Lexer e m => m Token
+token :: Lexer Token
 token = P.choice
   [ TokLeftParen   <$ P.char '('
   , TokRightParen  <$ P.char ')'
@@ -235,17 +270,17 @@ token = P.choice
 
   , P.try $ TokForall ASCII <$ (P.string "forall" <* P.notFollowedBy identLetter)
   , P.try $ TokUnderscore <$ (P.char '_' <* P.notFollowedBy identLetter)
-  , P.label "hole" $ P.try $ TokHole <$> (P.char '?' *> lname)
-  , P.label "identifier" identifier
-  , P.label "character" $ uncurry TokChar <$> charLiteral
-  , P.label "raw string" $ TokRawString <$> rawStringLiteral
-  , P.label "string" $ uncurry TokString <$> stringLiteral
-  , P.try $ P.label "number" $ uncurry TokNumber <$> numberLiteral
-  , P.try $ P.label "hex" $ uncurry TokInt <$> hexLiteral
-  , P.label "integer" $ uncurry TokInt <$> intLiteral
+  , P.try $ TokHole <$> (P.char '?' *> lname)
+  , identifier
+  , uncurry TokChar <$> charLiteral
+  , TokRawString <$> rawStringLiteral
+  , uncurry TokString <$> stringLiteral
+  , P.try $ uncurry TokNumber <$> numberLiteral
+  , P.try $ uncurry TokInt <$> hexLiteral
+  , uncurry TokInt <$> intLiteral
   ]
 
-identifier :: Lexer e m => m Token
+identifier :: Lexer Token
 identifier = go []
   where
   go accum =
@@ -259,25 +294,25 @@ identifier = go []
     TokLowerName qual <$> lname
       <|> TokSymbol qual <$> symbol
 
-lname :: Lexer e m => m Text
+lname :: Lexer Text
 lname = Text.cons <$> identStart <*> (Text.pack <$> P.many identLetter)
 
-uname :: Lexer e m => m Text
+uname :: Lexer Text
 uname = Text.cons <$> P.upperChar <*> (Text.pack <$> P.many identLetter)
 
-symbol :: Lexer e m => m Text
+symbol :: Lexer Text
 symbol = P.takeWhile1P (Just "symbol") isSymbolChar
 
-symbolChar :: Lexer e m => m Char
-symbolChar = P.label "symbol" $ P.satisfy isSymbolChar
+symbolChar :: Lexer Char
+symbolChar = P.satisfy isSymbolChar
 
 isSymbolChar :: Char -> Bool
 isSymbolChar c = (c `elem` (":!#$%&*+./<=>?@\\^|-~" :: [Char])) || (not (isAscii c) && isSymbol c)
 
-identStart :: Lexer e m => m Char
+identStart :: Lexer Char
 identStart = P.lowerChar <|> P.char '_'
 
-identLetter :: Lexer e m => m Char
+identLetter :: Lexer Char
 identLetter = P.alphaNumChar <|> P.char '_' <|> P.char '\''
 
 validModuleName :: Text -> Bool
@@ -289,34 +324,34 @@ validUName s = '\'' `notElemText` s
 notElemText :: Char -> Text -> Bool
 notElemText c = not . Text.any (== c)
 
-charLiteral :: Lexer e m => m (Text, Char)
+charLiteral :: Lexer (Text, Char)
 charLiteral = do
   (raw, ch) <- P.char '\'' *> P.match (charUnit (/= '\'')) <* P.char '\''
   if fromEnum ch > 0xFFFF
-    then fail "astral code point in character literal; characters must be valid UTF-16 code units"
+    then P.customFailure ErrAstralCodePointInChar
     else pure (raw, ch)
 
-charUnit :: Lexer e m => (Char -> Bool) -> m Char
+charUnit :: (Char -> Bool) -> Lexer Char
 charUnit p = do
   ch <- P.satisfy p
   case ch of
     '\\' -> charEscape
     _    -> pure ch
 
-charEscape :: forall e m. Lexer e m => m Char
-charEscape = P.label "character escape sequence" $ do
-  esc <- P.anySingle
+charEscape :: Lexer Char
+charEscape = do
+  esc <- P.lookAhead P.anySingle
   case esc of
-    't'  -> pure '\t'
-    'r'  -> pure '\r'
-    'n'  -> pure '\n'
-    '"'  -> pure '"'
-    '\'' -> pure '\''
-    '\\' -> pure '\\'
-    'x'  -> parseHex 0 0
-    _    -> P.empty
+    't'  -> P.takeP Nothing 1 $> '\t'
+    'r'  -> P.takeP Nothing 1 $> '\r'
+    'n'  -> P.takeP Nothing 1 $> '\n'
+    '"'  -> P.takeP Nothing 1 $> '"'
+    '\'' -> P.takeP Nothing 1 $> '\''
+    '\\' -> P.takeP Nothing 1 $> '\\'
+    'x'  -> P.takeP Nothing 1 *> parseHex 0 0
+    _    -> P.customFailure ErrCharEscape
   where
-  parseHex :: Int -> Int -> m Char
+  parseHex :: Int -> Int -> Lexer Char
   parseHex n acc
     | n >= 4 = pure $ chr acc
     | otherwise = do
@@ -325,25 +360,40 @@ charEscape = P.label "character escape sequence" $ do
           Nothing  -> pure $ chr acc
           Just ch' -> parseHex (n + 1) (acc * 16 + digitToInt ch')
 
-stringLiteral :: Lexer e m => m (Text, Text)
+stringLiteral :: Lexer (Text, Text)
 stringLiteral = P.char '"' *> go "" ""
   where
   go raw acc = do
-    chs <- P.takeWhileP Nothing (\c -> c /= '"' && c /= '\\' && c /= '\r' && c /= '\n')
+    chs <- P.takeWhileP Nothing isNormalChar
     ch  <- P.anySingle
+    let
+      raw' = raw <> chs
+      acc' = acc <> chs
     case ch of
-      '"'  -> pure (raw <> chs, acc <> chs)
-      '\\' -> P.choice
-        [ P.try (P.match gap) >>= \(raw', _) -> go (raw <> chs <> Text.singleton ch <> raw') acc
-        , P.match charEscape >>= \(raw', esc) -> go (raw <> chs <> Text.singleton ch <> raw') (acc <> chs <> Text.singleton esc)
-        ]
-      _ -> fail "Unexpected line feed"
+      '"'  -> pure (raw', acc')
+      '\\' -> goEscape (raw' <> Text.singleton ch) acc'
+      _    -> P.customFailure ErrLineFeedInString
 
-  gap = do
-    _ <- P.takeWhile1P (Just "string gap") (\c -> c == ' ' || c == '\r' || c == '\n')
-    P.char '\\'
+  goEscape raw acc = do
+    lk <- P.lookAhead P.anySingle
+    if isGapChar lk
+      then do
+        chs <- P.takeWhile1P Nothing isGapChar
+        ch  <- P.char '\\' <|> P.char '"'
+        case ch of
+          '"' -> pure (raw <> chs, acc)
+          _   -> go (raw <> chs <> Text.singleton ch) acc
+      else do
+        (raw', esc) <- P.match charEscape
+        go (raw <> raw') (acc <> Text.singleton esc)
 
-rawStringLiteral :: forall e m. Lexer e m => m Text
+  isNormalChar c =
+    c /= '"' && c /= '\\' && c /= '\r' && c /= '\n'
+
+  isGapChar c =
+    c == ' ' || c == '\r' || c == '\n'
+
+rawStringLiteral :: Lexer Text
 rawStringLiteral = P.string "\"\"\"" *> go mempty
   where
   go acc = do
@@ -353,11 +403,11 @@ rawStringLiteral = P.string "\"\"\"" *> go mempty
       then pure $ acc <> chs <> Text.dropEnd 3 quotes
       else go $ acc <> chs <> quotes
 
-intLiteral :: Lexer e m => m (Text, Integer)
+intLiteral :: Lexer (Text, Integer)
 intLiteral = P.match P.decimal
 
-hexLiteral :: Lexer e m => m (Text, Integer)
+hexLiteral :: Lexer (Text, Integer)
 hexLiteral = P.match $ P.string "0x" *> P.hexadecimal
 
-numberLiteral :: Lexer e m => m (Text, Double)
+numberLiteral :: Lexer (Text, Double)
 numberLiteral = P.match P.float

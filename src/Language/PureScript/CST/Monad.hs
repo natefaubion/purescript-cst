@@ -30,6 +30,9 @@ data ParserErrorType
   | ErrKeywordSymbol
   | ErrLetBinding
   | ErrToken
+  | ErrLineFeedInString
+  | ErrAstralCodePointInChar
+  | ErrCharEscape
   | ErrLexeme (Maybe String) [String]
   | ErrEof
   deriving (Show, Eq, Ord)
@@ -165,13 +168,19 @@ prettyPrintError (ParserError {..}) =
     ErrLexeme (Just (hd:_)) _ | isSpace hd ->
       "Illegal whitespace character " <> show hd
     ErrLexeme (Just a) _ ->
-      "Unexpected input " <> show a
+      "Unexpected " <> a
     ErrLexeme _ _ ->
       basicError
     ErrLetBinding ->
       basicError
     ErrToken ->
       basicError
+    ErrLineFeedInString ->
+      "Unexpected line feed in string literal"
+    ErrAstralCodePointInChar ->
+      "Illegal astral code point in character literal"
+    ErrCharEscape ->
+      "Illegal character escape code"
     ErrExpr ->
       basicError
     ErrDecl ->
