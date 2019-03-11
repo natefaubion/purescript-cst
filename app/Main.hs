@@ -18,6 +18,7 @@ import qualified Language.PureScript.Errors as Errs
 import qualified Language.PureScript.Make as Make
 import qualified Language.PureScript.Names as Names
 import qualified Language.PureScript.Parser.Declarations as Parser
+import qualified Language.PureScript.Parser.Lexer as Lexer
 import Language.PureScript.Options (defaultOptions)
 import System.Environment (getArgs)
 import System.Exit (die, exitFailure, exitSuccess)
@@ -53,12 +54,26 @@ main = do
     let
       mkCstBench (path, src) =
         bench path $ whnf (fmap (CST.convertModule path) . CST.parse) src
+        -- bench path $ whnf (CST.lex) src
       mkPscBench arg =
         bench (fst arg) $ whnf (Parser.parseModuleFromFile id) arg
+        -- bench (fst arg) $ whnf (uncurry Lexer.lex) arg
     runMode (Run defaultConfig Pattern ["purescript"])
       [ bgroup "purescript-cst" $ mkCstBench <$> srcs
       , bgroup "purescript" $ mkPscBench <$> srcs
       ]
+    exitSuccess
+
+  when ("--tokens" `elem` args) $ do
+    for_ filePaths $ \path -> do
+      src <- IO.readFile path
+      case CST.lex src of
+        Left errs ->
+          for_ errs $ \err ->
+            putStrLn $ ex <> " " <> path <> " " <> CST.prettyPrintError err
+        Right toks -> do
+          putStrLn $ check <> " " <> path
+          IO.putStrLn $ CST.printTokens toks
     exitSuccess
 
   mbModules <- forConcurrently filePaths $ \path -> do

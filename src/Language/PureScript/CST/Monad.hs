@@ -8,7 +8,6 @@ import Language.PureScript.CST.Layout
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Print
 import Language.PureScript.CST.Types
-import qualified Text.Megaparsec as P
 
 data ParserErrorType
   = ErrExpr
@@ -47,32 +46,39 @@ data ParserError = ParserError
   } deriving (Show, Eq)
 
 data ParserState = ParserState
-  { parserNext :: P.State Text
-  , parserBuff :: [SourceToken]
+  { parserBuff :: [SourceToken]
   , parserPos :: SourcePos
   , parserLeading :: [Comment LineFeed]
+  , parserSource :: Text
   , parserStack :: LayoutStack
   , parserErrors :: [ParserError]
   }
 
-newtype Parser a =
-  Parser (forall r. ParserState -> (ParserState -> ParserError -> r) -> (ParserState -> a -> r) -> r)
+newtype ParserM e s a =
+  Parser (forall r. s -> (s -> e -> r) -> (s -> a -> r) -> r)
 
-instance Functor Parser where
+type Parser = ParserM ParserError ParserState
+
+instance Functor (ParserM e s) where
+  {-# INLINE fmap #-}
   fmap f (Parser k) =
     Parser $ \st kerr ksucc ->
       k st kerr (\st' a -> ksucc st' (f a))
 
-instance Applicative Parser where
+instance Applicative (ParserM e s) where
+  {-# INLINE pure #-}
   pure a = Parser $ \st _ k -> k st a
+  {-# INLINE (<*>) #-}
   Parser k1 <*> Parser k2 =
     Parser $ \st kerr ksucc ->
       k1 st kerr $ \st' f ->
         k2 st' kerr $ \st'' a ->
           ksucc st'' (f a)
 
-instance Monad Parser where
+instance Monad (ParserM e s) where
+  {-# INLINE return #-}
   return = pure
+  {-# INLINE (>>=) #-}
   Parser k1 >>= k2 =
     Parser $ \st kerr ksucc ->
       k1 st kerr $ \st' a -> do
