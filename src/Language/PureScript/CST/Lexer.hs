@@ -136,13 +136,6 @@ next = Parser $ \inp kerr ksucc ->
     Just (ch, inp') -> ksucc inp' ch
     Nothing -> kerr inp ErrEof
 
-{-# INLINE maybeNext #-}
-maybeNext :: Lexer (Maybe Char)
-maybeNext = Parser $ \inp _ ksucc ->
-  case Text.uncons inp of
-    Just (ch, inp') -> ksucc inp' (Just ch)
-    Nothing -> ksucc inp Nothing
-
 {-# INLINE nextWhile #-}
 nextWhile :: (Char -> Bool) -> Lexer Text
 nextWhile p = Parser $ \inp _ ksucc -> do
@@ -242,36 +235,36 @@ breakComments = k0 []
         _ -> blockComment (acc <> chs <> dashes)
 
 token :: Lexer Token
-token = maybeNext >>= maybe (pure TokEof) k0
+token = peek >>= maybe (pure TokEof) k0
   where
   k0 ch1 = case ch1 of
-    '('  -> pure TokLeftParen
-    ')'  -> pure TokRightParen
-    '{'  -> pure TokLeftBrace
-    '}'  -> pure TokRightBrace
-    '['  -> pure TokLeftSquare
-    ']'  -> pure TokRightSquare
-    '`'  -> pure TokTick
-    ','  -> pure TokComma
-    '∷'  -> orSymbol1 (TokDoubleColon Unicode) ch1
-    '←'  -> orSymbol1 (TokLeftArrow Unicode) ch1
-    '→'  -> orSymbol1 (TokRightArrow Unicode) ch1
-    '⇒'  -> orSymbol1 (TokRightFatArrow Unicode) ch1
-    '∀'  -> orSymbol1 (TokForall Unicode) ch1
-    '|'  -> orSymbol1 TokPipe ch1
-    '.'  -> orSymbol1 TokDot ch1
-    '\\' -> orSymbol1 TokBackslash ch1
-    '<'  -> orSymbol2 (TokLeftArrow ASCII) ch1 '-'
-    '-'  -> orSymbol2 (TokRightArrow ASCII) ch1 '>'
-    '='  -> orSymbol2' TokEquals (TokRightFatArrow ASCII) ch1 '>'
-    ':'  -> orSymbol2' (TokSymbol [] ":") (TokDoubleColon ASCII) ch1 ':'
-    '?'  -> hole
-    '\'' -> char
-    '"'  -> string
-    _  | Char.isDigit ch1 -> number ch1
-       | Char.isUpper ch1 -> upper [] ch1
-       | isIdentStart ch1 -> lower [] ch1
-       | isSymbolChar ch1 -> symbol [] [ch1]
+    '('  -> next *> pure TokLeftParen
+    ')'  -> next *> pure TokRightParen
+    '{'  -> next *> pure TokLeftBrace
+    '}'  -> next *> pure TokRightBrace
+    '['  -> next *> pure TokLeftSquare
+    ']'  -> next *> pure TokRightSquare
+    '`'  -> next *> pure TokTick
+    ','  -> next *> pure TokComma
+    '∷'  -> next *> orSymbol1 (TokDoubleColon Unicode) ch1
+    '←'  -> next *> orSymbol1 (TokLeftArrow Unicode) ch1
+    '→'  -> next *> orSymbol1 (TokRightArrow Unicode) ch1
+    '⇒'  -> next *> orSymbol1 (TokRightFatArrow Unicode) ch1
+    '∀'  -> next *> orSymbol1 (TokForall Unicode) ch1
+    '|'  -> next *> orSymbol1 TokPipe ch1
+    '.'  -> next *> orSymbol1 TokDot ch1
+    '\\' -> next *> orSymbol1 TokBackslash ch1
+    '<'  -> next *> orSymbol2 (TokLeftArrow ASCII) ch1 '-'
+    '-'  -> next *> orSymbol2 (TokRightArrow ASCII) ch1 '>'
+    '='  -> next *> orSymbol2' TokEquals (TokRightFatArrow ASCII) ch1 '>'
+    ':'  -> next *> orSymbol2' (TokSymbol [] ":") (TokDoubleColon ASCII) ch1 ':'
+    '?'  -> next *> hole
+    '\'' -> next *> char
+    '"'  -> next *> string
+    _  | Char.isDigit ch1 -> next *> number ch1
+       | Char.isUpper ch1 -> next *> upper [] ch1
+       | isIdentStart ch1 -> next *> lower [] ch1
+       | isSymbolChar ch1 -> next *> symbol [] [ch1]
        | otherwise        -> throw $ ErrLexeme (Just [ch1]) []
 
   {-# INLINE orSymbol1 #-}
