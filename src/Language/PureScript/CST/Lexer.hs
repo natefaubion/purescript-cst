@@ -235,21 +235,21 @@ breakComments = k0 []
     if Text.null dashes
       then pure $ Comment $ acc <> chs
       else peek >>= \case
-        Just '}' -> next *> pure (Comment $ acc <> chs <> dashes <> "}")
+        Just '}' -> next $> Comment (acc <> chs <> dashes <> "}")
         _ -> blockComment (acc <> chs <> dashes)
 
 token :: Lexer Token
 token = peek >>= maybe (pure TokEof) k0
   where
   k0 ch1 = case ch1 of
-    '('  -> next *> pure TokLeftParen
-    ')'  -> next *> pure TokRightParen
-    '{'  -> next *> pure TokLeftBrace
-    '}'  -> next *> pure TokRightBrace
-    '['  -> next *> pure TokLeftSquare
-    ']'  -> next *> pure TokRightSquare
-    '`'  -> next *> pure TokTick
-    ','  -> next *> pure TokComma
+    '('  -> next $> TokLeftParen
+    ')'  -> next $> TokRightParen
+    '{'  -> next $> TokLeftBrace
+    '}'  -> next $> TokRightBrace
+    '['  -> next $> TokLeftSquare
+    ']'  -> next $> TokRightSquare
+    '`'  -> next $> TokTick
+    ','  -> next $> TokComma
     '∷'  -> next *> orSymbol1 (TokDoubleColon Unicode) ch1
     '←'  -> next *> orSymbol1 (TokLeftArrow Unicode) ch1
     '→'  -> next *> orSymbol1 (TokRightArrow Unicode) ch1
@@ -422,12 +422,12 @@ token = peek >>= maybe (pure TokEof) k0
   escape = do
     ch <- peek
     case ch of
-      Just 't'  -> next *> pure ("\t", '\t')
-      Just 'r'  -> next *> pure ("\\r", '\r')
-      Just 'n'  -> next *> pure ("\\n", '\n')
-      Just '"'  -> next *> pure ("\"", '"')
-      Just '\'' -> next *> pure ("'", '\'')
-      Just '\\' -> next *> pure ("\\", '\\')
+      Just 't'  -> next $> ("\t", '\t')
+      Just 'r'  -> next $> ("\\r", '\r')
+      Just 'n'  -> next $> ("\\n", '\n')
+      Just '"'  -> next $> ("\"", '"')
+      Just '\'' -> next $> ("'", '\'')
+      Just '\\' -> next $> ("\\", '\\')
       Just 'x'  -> (*>) next $ Parser $ \inp kerr ksucc -> do
         let
           go n acc (ch' : chs)
@@ -511,8 +511,8 @@ token = peek >>= maybe (pure TokEof) k0
   exponent = peek >>= \case
     Just 'e' -> do
       (neg, sign) <- next *> peek >>= \case
-        Just '-' -> next *> pure (True, "-")
-        Just '+' -> next *> pure (False, "+")
+        Just '-' -> next $> (True, "-")
+        Just '+' -> next $> (False, "+")
         _   -> pure (False, "")
       integer >>= \case
         Just (raw, chs) -> do
