@@ -81,6 +81,7 @@ dependencies:
 - pretty-simple
 - Glob
 - async
+- scientific
 
 library:
   source-dirs: src

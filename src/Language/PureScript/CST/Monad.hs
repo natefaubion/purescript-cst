@@ -34,6 +34,9 @@ data ParserErrorType
   | ErrLineFeedInString
   | ErrAstralCodePointInChar
   | ErrCharEscape
+  | ErrNumberOutOfRange
+  | ErrLeadingZero
+  | ErrExpectedExponent
   | ErrLexeme (Maybe String) [String]
   | ErrEof
   deriving (Show, Eq, Ord)
@@ -193,6 +196,12 @@ prettyPrintError (ParserError {..}) =
       "Illegal astral code point in character literal"
     ErrCharEscape ->
       "Illegal character escape code"
+    ErrNumberOutOfRange ->
+      "Number literal is out of range"
+    ErrLeadingZero ->
+      "Unexpected leading zeros"
+    ErrExpectedExponent ->
+      "Expected exponent"
     ErrExpr ->
       basicError
     ErrDecl ->

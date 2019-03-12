@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: c0d4ac0f9370721511157716d4af472c6f05a4a35fae3226407e84638107c485
+-- hash: fd96e0b67a2e7a9ab90be5f34185bb2f919626e5471ad4322b26d87d9084a74d
 
 name:           purescript-cst
 version:        0.1.0.0
@@ -56,6 +56,7 @@ library
     , pretty-simple
     , prettyprinter ==1.2.1
     , purescript ==0.12.2
+    , scientific
     , text
   default-language: Haskell2010
 
@@ -82,6 +83,7 @@ executable purescript-cst-exe
     , prettyprinter ==1.2.1
     , purescript ==0.12.2
     , purescript-cst
+    , scientific
     , text
   default-language: Haskell2010
 
@@ -109,5 +111,6 @@ test-suite purescript-cst-test
     , prettyprinter ==1.2.1
     , purescript ==0.12.2
     , purescript-cst
+    , scientific
     , text
   default-language: Haskell2010

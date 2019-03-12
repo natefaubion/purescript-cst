@@ -5,13 +5,14 @@ module Language.PureScript.CST.Lexer
   , munch
   ) where
 
-import Prelude hiding (lex)
+import Prelude hiding (lex, exp, exponent, lines)
 
 import Control.Monad (join)
 import qualified Data.Char as Char
 import qualified Data.DList as DList
 import Data.Foldable (foldl')
-import Data.Ratio ((%))
+import Data.Functor (($>))
+import qualified Data.Scientific as Sci
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Language.PureScript.CST.Monad
@@ -89,9 +90,9 @@ munch = Parser $ \state@(ParserState {..}) kerr ksucc ->
     tok : parserBuff' -> do
       let state' = state { parserBuff = parserBuff' }
       ksucc state' tok
-    _ ->
-      case tokenAndComments parserSource of
-        (Right (TokEof, _), _) -> do
+    _ -> do
+      let
+        onSuccess _ (TokEof, _) = do
           let
             toks = unwindLayout parserPos parserStack
             state' = state
@@ -99,7 +100,7 @@ munch = Parser $ \state@(ParserState {..}) kerr ksucc ->
               , parserStack = []
               }
           ksucc state' (head toks)
-        (Right (tok, (trailing, parserLeading')), parserSource') -> do
+        onSuccess parserSource' (tok, (trailing, parserLeading')) = do
           let
             endPos = advanceToken parserPos tok
             parserPos' = advanceLeading (advanceTrailing endPos trailing) parserLeading'
@@ -118,7 +119,7 @@ munch = Parser $ \state@(ParserState {..}) kerr ksucc ->
               , parserStack = parserStack'
               }
           ksucc state' (head toks)
-        (Left err, parserSource') -> do
+        onError parserSource' err = do
           let
             len1 = Text.length parserSource
             len2 = Text.length parserSource'
@@ -126,15 +127,15 @@ munch = Parser $ \state@(ParserState {..}) kerr ksucc ->
             chunkDelta = textDelta chunk
             pos = applyDelta parserPos chunkDelta
           kerr state $ ParserError (SourceRange pos $ applyDelta pos (0, 1)) [] parserStack err
+        Parser k = tokenAndComments
+      k parserSource onError onSuccess
 
 type Lexer = ParserM ParserErrorType Text
 
 {-# INLINE next #-}
-next :: Lexer Char
-next = Parser $ \inp kerr ksucc ->
-  case Text.uncons inp of
-    Just (ch, inp') -> ksucc inp' ch
-    Nothing -> kerr inp ErrEof
+next :: Lexer ()
+next = Parser $ \inp _ ksucc ->
+  ksucc (Text.drop 1 inp) ()
 
 {-# INLINE nextWhile #-}
 nextWhile :: (Char -> Bool) -> Lexer Text
@@ -144,19 +145,22 @@ nextWhile p = Parser $ \inp _ ksucc -> do
 
 {-# INLINE peek #-}
 peek :: Lexer (Maybe Char)
-peek = Parser $ \inp _ ksucc -> do
-  case Text.uncons inp of
-    Just (ch, _) -> ksucc inp (Just ch)
-    Nothing -> ksucc inp Nothing
+peek = Parser $ \inp _ ksucc ->
+  if Text.null inp
+    then ksucc inp Nothing
+    else ksucc inp $ Just $ Text.head inp
 
 {-# INLINE throw #-}
 throw :: ParserErrorType -> Lexer a
 throw err = Parser $ \inp kerr _ -> kerr inp err
 
-tokenAndComments :: Text -> (Either ParserErrorType (Token, ([Comment void], [Comment LineFeed])), Text)
-tokenAndComments = \src -> k src (\inp err -> (Left err, inp)) (\inp res -> (Right res, inp))
-  where
-  Parser k = (,) <$> token <*> breakComments
+{-# INLINE restore #-}
+restore :: (ParserErrorType -> Bool) -> Lexer a -> Lexer a
+restore p (Parser k) = Parser $ \inp kerr ksucc ->
+  k inp (\inp' err -> kerr (if p err then inp else inp') err) ksucc
+
+tokenAndComments :: Lexer (Token, ([Comment void], [Comment LineFeed]))
+tokenAndComments = (,) <$> token <*> breakComments
 
 comments :: Text -> ([Comment LineFeed], Text)
 comments = \src -> k src (\_ _ -> ([], src)) (\inp (a, b) -> (a <> b, inp))
@@ -168,19 +172,19 @@ breakComments = k0 []
   where
   k0 acc = do
     spaces <- nextWhile (== ' ')
-    lines' <- nextWhile isLineFeed
+    lines  <- nextWhile isLineFeed
     let
       acc'
         | Text.null spaces = acc
         | otherwise = Space (Text.length spaces) : acc
-    if Text.null lines'
+    if Text.null lines
       then do
         mbComm <- comment
         case mbComm of
           Just comm -> k0 (comm : acc')
           Nothing   -> pure (reverse acc', [])
       else
-        k1 acc' (goWs [] $ Text.unpack lines')
+        k1 acc' (goWs [] $ Text.unpack lines)
 
   k1 trl acc = do
     ws <- nextWhile (\c -> c == ' ' || isLineFeed c)
@@ -261,13 +265,14 @@ token = peek >>= maybe (pure TokEof) k0
     '?'  -> next *> hole
     '\'' -> next *> char
     '"'  -> next *> string
-    _  | Char.isDigit ch1 -> next *> number ch1
+    _  | Char.isDigit ch1 -> restore (\err -> err == ErrNumberOutOfRange) (next *> number ch1)
        | Char.isUpper ch1 -> next *> upper [] ch1
        | isIdentStart ch1 -> next *> lower [] ch1
        | isSymbolChar ch1 -> next *> symbol [] [ch1]
        | otherwise        -> throw $ ErrLexeme (Just [ch1]) []
 
   {-# INLINE orSymbol1 #-}
+  orSymbol1 :: Token -> Char -> Lexer Token
   orSymbol1 tok ch1 = join $ Parser $ \inp _ ksucc ->
     case Text.uncons inp of
       Just (ch2, inp2) | isSymbolChar ch2 ->
@@ -276,6 +281,7 @@ token = peek >>= maybe (pure TokEof) k0
         ksucc inp $ pure tok
 
   {-# INLINE orSymbol2 #-}
+  orSymbol2 :: Token -> Char -> Char -> Lexer Token
   orSymbol2 tok ch1 ch2 = join $ Parser $ \inp _ ksucc ->
     case Text.uncons inp of
       Just (ch2', inp2) | ch2 == ch2' ->
@@ -288,6 +294,7 @@ token = peek >>= maybe (pure TokEof) k0
         ksucc inp $ symbol [] [ch1]
 
   {-# INLINE orSymbol2' #-}
+  orSymbol2' :: Token -> Token -> Char -> Char -> Lexer Token
   orSymbol2' tok1 tok2 ch1 ch2 = join $ Parser $ \inp _ ksucc ->
     case Text.uncons inp of
       Just (ch2', inp2) | ch2 == ch2' ->
@@ -301,10 +308,12 @@ token = peek >>= maybe (pure TokEof) k0
       _ ->
         ksucc inp $ pure tok1
 
+  symbol :: [Text] -> [Char] -> Lexer Token
   symbol qual pre = do
     rest <- nextWhile isSymbolChar
     pure . TokSymbol (reverse qual) $ Text.pack pre <> rest
 
+  upper :: [Text] -> Char -> Lexer Token
   upper qual pre = do
     rest <- nextWhile isIdentChar
     ch1  <- peek
@@ -312,14 +321,18 @@ token = peek >>= maybe (pure TokEof) k0
     case ch1 of
       Just '.' -> do
         let qual' = name : qual
-        ch2 <- next *> next
-        if | Char.isUpper ch2 -> upper qual' ch2
-           | isIdentStart ch2 -> lower qual' ch2
-           | isSymbolChar ch2 -> symbol qual' [ch2]
-           | otherwise -> throw $ ErrLexeme (Just [ch2]) []
+        next *> peek >>= \case
+          Just ch2
+            | Char.isUpper ch2 -> next *> upper qual' ch2
+            | isIdentStart ch2 -> next *> lower qual' ch2
+            | isSymbolChar ch2 -> next *> symbol qual' [ch2]
+            | otherwise -> throw $ ErrLexeme (Just [ch2]) []
+          Nothing ->
+            throw ErrEof
       _ ->
         pure $ TokUpperName (reverse qual) name
 
+  lower :: [Text] -> Char -> Lexer Token
   lower qual pre = do
     rest <- nextWhile isIdentChar
     case pre of
@@ -332,28 +345,33 @@ token = peek >>= maybe (pure TokEof) k0
           "forall" | null qual -> pure $ TokForall ASCII
           name -> pure $ TokLowerName (reverse qual) name
 
+  hole :: Lexer Token
   hole = do
     name <- nextWhile isIdentChar
     if Text.null name
       then symbol [] ['?']
       else pure $ TokHole name
 
+  char :: Lexer Token
   char = do
-    ch1 <- next
-    (raw, ch) <- case ch1 of
-      '\\' -> do
-        (raw, ch2) <- escape
+    (raw, ch) <- peek >>= \case
+      Just '\\' -> do
+        (raw, ch2) <- next *> escape
         pure (Text.cons '\\' raw, ch2)
-      ch ->
-        pure (Text.singleton ch, ch)
-    ch2 <- next
-    case ch2 of
-      '\''
+      Just ch ->
+        next $> (Text.singleton ch, ch)
+      Nothing ->
+        throw $ ErrEof
+    peek >>= \case
+      Just '\''
         | fromEnum ch > 0xFFFF -> throw ErrAstralCodePointInChar
-        | otherwise -> pure $ TokChar raw ch
-      _ ->
+        | otherwise -> next $> TokChar raw ch
+      Just ch2 ->
         throw $ ErrLexeme (Just [ch2]) []
+      _ ->
+        throw $ ErrEof
 
+  string :: Lexer Token
   string = do
     quotes1 <- nextWhile (== '"')
     case Text.length quotes1 of
@@ -361,25 +379,25 @@ token = peek >>= maybe (pure TokEof) k0
         let
           go raw acc = do
             chs <- nextWhile isNormalStringChar
-            ch  <- next
             let
               raw' = raw <> chs
               acc' = acc <> chs
-            case ch of
-              '"'  -> pure $ TokString raw' acc'
-              '\\' -> goEscape (raw' <> Text.singleton ch) acc'
-              _    -> throw ErrLineFeedInString
+            peek >>= \case
+              Just '"'  -> next $> TokString raw' acc'
+              Just '\\' -> next *> goEscape (raw' <> "\\") acc'
+              Just _    -> throw ErrLineFeedInString
+              Nothing   -> throw ErrEof
 
           goEscape raw acc = do
             mbCh <- peek
             case mbCh of
               Just ch1 | isStringGapChar ch1 -> do
                 gap <- nextWhile isStringGapChar
-                ch2 <- next
-                case ch2 of
-                  '"'  -> pure $ TokString (raw <> gap) acc
-                  '\\' -> go (raw <> gap <> "\\") acc
-                  _    -> throw ErrCharEscape -- TODO error
+                peek >>= \case
+                  Just '"'  -> next $> TokString (raw <> gap) acc
+                  Just '\\' -> next *> go (raw <> gap <> "\\") acc
+                  Just _    -> throw ErrCharEscape -- TODO error
+                  Nothing   -> throw ErrEof
               _ -> do
                 (raw', ch) <- escape
                 go (raw <> raw') (acc <> Text.singleton ch)
@@ -400,6 +418,7 @@ token = peek >>= maybe (pure TokEof) k0
               _          -> go (acc <> chs <> quotes2)
         go ""
 
+  escape :: Lexer (Text, Char)
   escape = do
     ch <- peek
     case ch of
@@ -422,49 +441,105 @@ token = peek >>= maybe (pure TokEof) k0
         go 0 [] $ Text.unpack $ Text.take 6 inp
       _ -> throw ErrCharEscape
 
-  number ch1 = do
-    (raw, int) <- integer ch1
-    fraction >>= \case
-      Just (raw', frac) ->
-        pure $ TokNumber (raw <> "." <> raw') (fromIntegral int + frac)
-      Nothing ->
-        pure $ TokInt raw int
+  number :: Char -> Lexer Token
+  number ch1 = peek >>= \ch2 -> case (ch1, ch2) of
+    ('0', Just 'x') -> next *> hexadecimal
+    (_, _) -> do
+      mbInt <- integer1 ch1
+      mbFraction <- fraction
+      case (mbInt, mbFraction) of
+        (Just (raw, int), Nothing) -> do
+          let int' = digitsToInteger int
+          exponent >>= \case
+            Just (raw', exp) ->
+              sciDouble (raw <> raw') $ Sci.scientific int' exp
+            Nothing ->
+              pure $ TokInt raw int'
+        (Just (raw, int), Just (raw', frac)) -> do
+          let sci = digitsToScientific int frac
+          exponent >>= \case
+            Just (raw'', exp) ->
+              sciDouble (raw <> raw' <> raw'') $ uncurry Sci.scientific $ (+ exp) <$> sci
+            Nothing ->
+              sciDouble (raw <> raw') $ uncurry Sci.scientific sci
+        (Nothing, Just (raw, frac)) -> do
+          let sci = digitsToScientific [] frac
+          exponent >>= \case
+            Just (raw', exp) ->
+              sciDouble (raw <> raw') $ uncurry Sci.scientific $ (+ exp) <$> sci
+            Nothing ->
+              sciDouble raw $ uncurry Sci.scientific sci
+        (Nothing, Nothing) ->
+          peek >>= \ch -> throw $ ErrLexeme (pure <$> ch) []
 
-  integer ch1 = do
-    chs <- nextWhile isNumberChar
-    case ch1 of
-      '0' | Text.null chs -> do
-        ch2 <- peek
-        case ch2 of
-          Just 'x' -> do
-            chs' <- next *> nextWhile Char.isHexDigit
-            let int = foldl' (\n c -> n * 10 + fromIntegral (Char.digitToInt c)) 0 $ Text.unpack chs
-            pure ("0x" <> chs', int)
-          _ ->
-            pure ("0", 0)
-      _ | Text.null chs ->
-        pure (Text.singleton ch1, fromIntegral $ Char.digitToInt ch1)
-      _ -> do
-        let
-          go n '_' = n
-          go n c   = n * 10 + fromIntegral (Char.digitToInt c)
-        pure (Text.singleton ch1 <> chs, foldl' go 0 $ ch1 : Text.unpack chs)
+  sciDouble :: Text -> Sci.Scientific -> Lexer Token
+  sciDouble raw sci = case Sci.toBoundedRealFloat sci of
+    Left _ -> throw ErrNumberOutOfRange
+    Right n -> pure $ TokNumber raw n
 
-  fraction = do
-    ch1 <- peek
-    case ch1 of
-      Just '.' -> do
-        chs <- next *> nextWhile isNumberChar
-        if Text.null chs
-          then pure $ Just ("", 0)
-          else do
-            let
-              go acc '_' = acc
-              go (!plc, !n) c = (plc * 10, n + (fromIntegral (Char.digitToInt c) % plc))
-              res = foldl' go (10, 0 % 1) $ Text.unpack chs
-            pure $ Just (chs, fromRational $ snd res)
-      _ ->
-        pure Nothing
+  integer :: Lexer (Maybe (Text, String))
+  integer = peek >>= \case
+    Just '0' -> next *> peek >>= \case
+      Just ch | isNumberChar ch -> throw ErrLeadingZero
+      _ -> pure $ Just ("0", "0")
+    Just ch | isDigitChar ch -> Just <$> digits
+    _ -> pure $ Nothing
+
+  integer1 :: Char -> Lexer (Maybe (Text, String))
+  integer1 = \case
+    '0' -> peek >>= \case
+      Just ch | isNumberChar ch -> throw ErrLeadingZero
+      _ -> pure $ Just ("0", "0")
+    ch | isDigitChar ch -> do
+      (raw, chs) <- digits
+      pure $ Just (Text.cons ch raw, ch : chs)
+    _ -> pure $ Nothing
+
+  fraction :: Lexer (Maybe (Text, String))
+  fraction = peek >>= \case
+    Just '.' -> do
+      (raw, chs) <- next *> digits
+      pure $ Just ("." <> raw, chs)
+    _ -> pure $ Nothing
+
+  digits :: Lexer (Text, String)
+  digits = do
+    raw <- nextWhile isDigitChar
+    pure (raw, filter (/= '_') $ Text.unpack raw)
+
+  exponent :: Lexer (Maybe (Text, Int))
+  exponent = peek >>= \case
+    Just 'e' -> do
+      (neg, sign) <- next *> peek >>= \case
+        Just '-' -> next *> pure (True, "-")
+        Just '+' -> next *> pure (False, "+")
+        _   -> pure (False, "")
+      integer >>= \case
+        Just (raw, chs) -> do
+          let
+            int | neg = negate $ digitsToInteger chs
+                | otherwise = digitsToInteger chs
+          pure $ Just ("e" <> sign <> raw, fromInteger int)
+        Nothing -> throw ErrExpectedExponent
+    _ ->
+      pure Nothing
+
+  hexadecimal :: Lexer Token
+  hexadecimal = do
+    chs <- nextWhile Char.isHexDigit
+    pure $ TokInt ("0x" <> chs) $ digitsToIntegerBase 16 $ Text.unpack chs
+
+digitsToInteger :: [Char] -> Integer
+digitsToInteger = digitsToIntegerBase 10
+
+digitsToIntegerBase :: Integer -> [Char] -> Integer
+digitsToIntegerBase b = foldl' (\n c -> n * b + (toInteger (Char.digitToInt c))) 0
+
+digitsToScientific :: [Char] -> [Char] -> (Integer, Int)
+digitsToScientific = go 0 . reverse
+  where
+  go !exp is [] = (digitsToInteger (reverse is), exp)
+  go !exp is (f : fs) = go (exp - 1) (f : is) fs
 
 isSymbolChar :: Char -> Bool
 isSymbolChar c = (c `elem` (":!#$%&*+./<=>?@\\^|-~" :: [Char])) || (not (Char.isAscii c) && Char.isSymbol c)
@@ -475,8 +550,11 @@ isIdentStart c = Char.isLower c || c == '_'
 isIdentChar :: Char -> Bool
 isIdentChar c = Char.isAlphaNum c || c == '_' || c == '\''
 
+isDigitChar :: Char -> Bool
+isDigitChar c = c >= '0' && c <= '9'
+
 isNumberChar :: Char -> Bool
-isNumberChar c = Char.isDigit c || c == '_'
+isNumberChar c = c >= '0' && c <= '9' || c == '_'
 
 isNormalStringChar :: Char -> Bool
 isNormalStringChar c = c /= '"' && c /= '\\' && c /= '\r' && c /= '\n'
