@@ -309,7 +309,9 @@ token = peek >>= maybe (pure TokEof) k0
         ksucc inp $ pure tok1
 
   leftParen :: Lexer Token
-  leftParen = Parser $ \inp _ ksucc ->
+  leftParen = Parser $ \inp kerr ksucc ->
+    -- We need to check for symbolic names like `(<>)` because we lex them as
+    -- a single token.
     case Text.span isSymbolChar inp of
       (chs, inp2)
         | Text.null chs -> ksucc inp TokLeftParen
@@ -319,17 +321,18 @@ token = peek >>= maybe (pure TokEof) k0
                 case chs of
                   "→"  -> ksucc inp3 $ TokSymbolArr Unicode
                   "->" -> ksucc inp3 $ TokSymbolArr ASCII
-                  _    -> ksucc inp3 $ TokSymbolName [] chs
+                  _ | isReservedSymbol chs -> kerr inp $ ErrReservedSymbol chs
+                    | otherwise -> ksucc inp3 $ TokSymbolName [] chs
               _ -> ksucc inp TokLeftParen
 
   symbolParen :: [Text] -> Lexer Token
-  symbolParen qual = restore (== ErrQualifiedArr) $ peek >>= \case
+  symbolParen qual = restore isReservedSymbolError $ peek >>= \case
     Just ch | isSymbolChar ch ->
-      nextWhile isSymbolChar >>= \case
-        "→"  -> throw ErrQualifiedArr
-        "->" -> throw ErrQualifiedArr
-        sym  -> peek >>= \case
-          Just ')' -> next $> TokSymbolName qual sym
+      nextWhile isSymbolChar >>= \chs ->
+        peek >>= \case
+          Just ')'
+            | isReservedSymbol chs -> throw $ ErrReservedSymbol chs
+            | otherwise -> next $> TokSymbolName qual chs
           Just ch2 -> throw $ ErrLexeme (Just [ch2]) []
           Nothing  -> throw ErrEof
     Just ch -> throw $ ErrLexeme (Just [ch]) []
@@ -424,7 +427,7 @@ token = peek >>= maybe (pure TokEof) k0
                 peek >>= \case
                   Just '"'  -> next $> TokString (raw <> gap) acc
                   Just '\\' -> next *> go (raw <> gap <> "\\") acc
-                  Just _    -> throw ErrCharEscape -- TODO error
+                  Just ch   -> throw $ ErrCharInGap ch
                   Nothing   -> throw ErrEof
               _ -> do
                 (raw', ch) <- escape
@@ -571,6 +574,30 @@ digitsToScientific = go 0 . reverse
 
 isSymbolChar :: Char -> Bool
 isSymbolChar c = (c `elem` (":!#$%&*+./<=>?@\\^|-~" :: [Char])) || (not (Char.isAscii c) && Char.isSymbol c)
+
+isReservedSymbolError :: ParserErrorType -> Bool
+isReservedSymbolError = \case
+  ErrReservedSymbol _ -> True
+  _ -> False
+
+isReservedSymbol :: Text -> Bool
+isReservedSymbol = flip elem symbols
+  where
+  symbols =
+    [ "::"
+    , "∷"
+    , "<-"
+    , "←"
+    , "->"
+    , "→"
+    , "=>"
+    , "⇒"
+    , "∀"
+    , "|"
+    , "."
+    , "\\"
+    , "="
+    ]
 
 isIdentStart :: Char -> Bool
 isIdentStart c = Char.isLower c || c == '_'

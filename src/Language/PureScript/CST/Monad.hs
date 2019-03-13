@@ -37,7 +37,8 @@ data ParserErrorType
   | ErrNumberOutOfRange
   | ErrLeadingZero
   | ErrExpectedExponent
-  | ErrQualifiedArr
+  | ErrReservedSymbol Text
+  | ErrCharInGap Char
   | ErrLexeme (Maybe String) [String]
   | ErrEof
   deriving (Show, Eq, Ord)
@@ -197,8 +198,10 @@ prettyPrintError (ParserError {..}) =
       "Unexpected leading zeros"
     ErrExpectedExponent ->
       "Expected exponent"
-    ErrQualifiedArr ->
-      "Unexpected qualified function arrow"
+    ErrReservedSymbol sym ->
+      "Unexpected reserved symbol " <> show sym
+    ErrCharInGap ch ->
+      "Unexpected character " <> show ch <> " in gap"
     ErrLexeme _ _ ->
       basicError
     ErrLetBinding ->
