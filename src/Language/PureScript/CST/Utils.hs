@@ -14,10 +14,10 @@ import Language.PureScript.CST.Traversals.Type
 import Language.PureScript.CST.Types
 
 placeholder :: SourceToken
-placeholder =
-  ( TokenAnn (SourceRange (SourcePos 0 0) (SourcePos 0 0)) [] []
-  , TokLowerName [] "<placeholder>"
-  )
+placeholder = SourceToken
+  { tokAnn = TokenAnn (SourceRange (SourcePos 0 0) (SourcePos 0 0)) [] []
+  , tokValue = TokLowerName [] "<placeholder>"
+  }
 
 unexpected :: SourceToken -> Ident
 unexpected tok = Ident tok [] "<unexpected>"
@@ -51,64 +51,64 @@ internalError :: String -> a
 internalError = error
 
 toIdent :: SourceToken -> Ident
-toIdent tok = case tok of
-  (_, TokLowerName q a)  -> Ident tok q a
-  (_, TokUpperName q a)  -> Ident tok q a
-  (_, TokSymbolName q a) -> Ident tok q a
-  (_, TokSymbol q a)     -> Ident tok q a
-  (_, TokHole a)         -> Ident tok [] a
-  _                      -> internalError $ "Invalid identifier token: " <> show tok
+toIdent tok = case tokValue tok of
+  TokLowerName q a  -> Ident tok q a
+  TokUpperName q a  -> Ident tok q a
+  TokSymbolName q a -> Ident tok q a
+  TokSymbol q a     -> Ident tok q a
+  TokHole a         -> Ident tok [] a
+  _                 -> internalError $ "Invalid identifier token: " <> show tok
 
 toVar :: SourceToken -> Parser Ident
-toVar tok = case tok of
-  (_, TokLowerName q a)
+toVar tok = case tokValue tok of
+  TokLowerName q a
     | not (Set.member a reservedNames) -> pure $ Ident tok q a
     | otherwise -> parseFail tok ErrKeywordVar
   _ -> internalError $ "Invalid variable token: " <> show tok
 
 toSymbol :: SourceToken -> Ident
-toSymbol tok = case tok of
-  (_, TokSymbol q a) -> Ident tok q a
+toSymbol tok = case tokValue tok of
+  TokSymbol q a -> Ident tok q a
   _ -> internalError $ "Invalid operator token: " <> show tok
 
 toLabel :: SourceToken -> Ident
-toLabel tok = case tok of
-  (_, TokLowerName [] a) -> Ident tok [] a
-  (_, TokString _ a)     -> Ident tok [] a
-  (_, TokRawString a)    -> Ident tok [] a
-  (_, TokForall ASCII)   -> Ident tok [] "forall"
-  _                      -> internalError $ "Invalid label: " <> show tok
+toLabel tok = case tokValue tok of
+  TokLowerName [] a -> Ident tok [] a
+  TokString _ a     -> Ident tok [] a
+  TokRawString a    -> Ident tok [] a
+  TokForall ASCII   -> Ident tok [] "forall"
+  _                 -> internalError $ "Invalid label: " <> show tok
 
 labelToVar :: Ident -> Parser Ident
 labelToVar (Ident tok _ _) = toVar tok
 
 toString :: SourceToken -> (SourceToken, Text)
-toString tok = case tok of
-  (_, TokString _ a)  -> (tok, a)
-  (_, TokRawString a) -> (tok, a)
-  _                   -> internalError $ "Invalid string literal: " <> show tok
+toString tok = case tokValue tok of
+  TokString _ a  -> (tok, a)
+  TokRawString a -> (tok, a)
+  _              -> internalError $ "Invalid string literal: " <> show tok
 
 toChar :: SourceToken -> (SourceToken, Char)
-toChar tok = case tok of
-  (_, TokChar _ a) -> (tok, a)
-  _                -> internalError $ "Invalid char literal: " <> show tok
+toChar tok = case tokValue tok of
+  TokChar _ a -> (tok, a)
+  _           -> internalError $ "Invalid char literal: " <> show tok
 
 toNumber :: SourceToken -> (SourceToken, Either Integer Double)
-toNumber tok = case tok of
-  (_, TokInt _ a)    -> (tok, Left a)
-  (_, TokNumber _ a) -> (tok, Right a)
-  _                  -> internalError $ "Invalid number literal: " <> show tok
+toNumber tok = case tokValue tok of
+  TokInt _ a    -> (tok, Left a)
+  TokNumber _ a -> (tok, Right a)
+  _             -> internalError $ "Invalid number literal: " <> show tok
 
 toInt :: SourceToken -> (SourceToken, Integer)
-toInt tok = case tok of
-  (_, TokInt _ a)    -> (tok, a)
-  _                  -> internalError $ "Invalid integer literal: " <> show tok
+toInt tok = case tokValue tok of
+  TokInt _ a    -> (tok, a)
+  _             -> internalError $ "Invalid integer literal: " <> show tok
 
 toBoolean :: SourceToken -> (SourceToken, Bool)
-toBoolean tok = case tok of
-  (_, TokLowerName [] "true")  -> (tok, True)
-  (_, TokLowerName [] "false") -> (tok, False)
-  _                            -> internalError $ "Invalid boolean literal: " <> show tok
+toBoolean tok = case tokValue tok of
+  TokLowerName [] "true"  -> (tok, True)
+  TokLowerName [] "false" -> (tok, False)
+  _                       -> internalError $ "Invalid boolean literal: " <> show tok
 
 toBinders :: forall a. Monoid a => Expr a -> Parser [Binder a]
 toBinders = convert []

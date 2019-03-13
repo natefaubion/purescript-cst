@@ -7,8 +7,8 @@ import Data.Void (Void)
 import GHC.Generics (Generic)
 
 data SourcePos = SourcePos
-  { srcLine :: !Int
-  , srcColumn :: !Int
+  { srcLine :: {-# UNPACK #-} !Int
+  , srcColumn :: {-# UNPACK #-} !Int
   } deriving (Show, Eq, Ord, Generic)
 
 data SourceRange = SourceRange
@@ -18,15 +18,15 @@ data SourceRange = SourceRange
 
 data Comment l
   = Comment !Text
-  | Space Int
-  | Line l
+  | Space {-# UNPACK #-} !Int
+  | Line !l
   deriving (Show, Eq, Ord, Generic, Functor)
 
 data LineFeed = LF | CRLF
   deriving (Show, Eq, Ord, Generic)
 
 data TokenAnn = TokenAnn
-  { tokRange :: SourceRange
+  { tokRange :: !SourceRange
   , tokLeadingComments :: ![Comment LineFeed]
   , tokTrailingComments :: ![Comment Void]
   } deriving (Show, Eq, Ord, Generic)
@@ -41,11 +41,11 @@ data Token
   | TokRightBrace
   | TokLeftSquare
   | TokRightSquare
-  | TokLeftArrow SourceStyle
-  | TokRightArrow SourceStyle
-  | TokRightFatArrow SourceStyle
-  | TokDoubleColon SourceStyle
-  | TokForall SourceStyle
+  | TokLeftArrow !SourceStyle
+  | TokRightArrow !SourceStyle
+  | TokRightFatArrow !SourceStyle
+  | TokDoubleColon !SourceStyle
+  | TokForall !SourceStyle
   | TokEquals
   | TokPipe
   | TokTick
@@ -53,24 +53,27 @@ data Token
   | TokComma
   | TokUnderscore
   | TokBackslash
-  | TokLowerName [Text] Text
-  | TokUpperName [Text] Text
-  | TokSymbol [Text] Text
-  | TokSymbolName [Text] Text
-  | TokSymbolArr SourceStyle
-  | TokHole Text
-  | TokChar Text Char
-  | TokString Text Text
-  | TokRawString Text
-  | TokInt Text Integer
-  | TokNumber Text Double
+  | TokLowerName ![Text] !Text
+  | TokUpperName ![Text] !Text
+  | TokSymbol ![Text] !Text
+  | TokSymbolName ![Text] !Text
+  | TokSymbolArr !SourceStyle
+  | TokHole !Text
+  | TokChar !Text !Char
+  | TokString !Text !Text
+  | TokRawString !Text
+  | TokInt !Text !Integer
+  | TokNumber !Text !Double
   | TokLayoutStart
   | TokLayoutSep
   | TokLayoutEnd
   | TokEof
   deriving (Show, Eq, Ord, Generic)
 
-type SourceToken = (TokenAnn, Token)
+data SourceToken = SourceToken
+  { tokAnn :: !TokenAnn
+  , tokValue :: !Token
+  } deriving (Show, Eq, Ord, Generic)
 
 data Ident = Ident
   { identTok :: SourceToken

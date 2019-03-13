@@ -25,79 +25,79 @@ import Language.PureScript.CST.Utils
 %tokentype { SourceToken }
 %monad { Parser }
 %error { parseError }
-%lexer { lexer } { (_, TokEof) }
+%lexer { lexer } { SourceToken _ TokEof }
 
 %token
-  '('             { (_, TokLeftParen) }
-  ')'             { (_, TokRightParen) }
-  '{'             { (_, TokLeftBrace) }
-  '}'             { (_, TokRightBrace) }
-  '['             { (_, TokLeftSquare) }
-  ']'             { (_, TokRightSquare) }
-  '\{'            { (_, TokLayoutStart) }
-  '\}'            { (_, TokLayoutEnd) }
-  '\;'            { (_, TokLayoutSep) }
-  '<-'            { (_, TokLeftArrow _) }
-  '->'            { (_, TokRightArrow _) }
-  '<='            { (_, TokSymbol [] sym) | sym == "<=" || sym == "⇐" }
-  '=>'            { (_, TokRightFatArrow _) }
-  ':'             { (_, TokSymbol [] ":") }
-  '::'            { (_, TokDoubleColon _) }
-  '='             { (_, TokEquals) }
-  '|'             { (_, TokPipe) }
-  '`'             { (_, TokTick) }
-  '.'             { (_, TokDot) }
-  ','             { (_, TokComma) }
-  '_'             { (_, TokUnderscore) }
-  '\\'            { (_, TokBackslash) }
-  '-'             { (_, TokSymbol [] "-") }
-  '@'             { (_, TokSymbol [] "@") }
-  '#'             { (_, TokSymbol [] "#") }
-  'ado'           { (_, TokLowerName _ "ado") }
-  'as'            { (_, TokLowerName [] "as") }
-  'case'          { (_, TokLowerName [] "case") }
-  'class'         { (_, TokLowerName [] "class") }
-  'data'          { (_, TokLowerName [] "data") }
-  'derive'        { (_, TokLowerName [] "derive") }
-  'do'            { (_, TokLowerName _ "do") }
-  'else'          { (_, TokLowerName [] "else") }
-  'false'         { (_, TokLowerName [] "false") }
-  'forall'        { (_, TokForall ASCII) }
-  'forallu'       { (_, TokForall Unicode) }
-  'foreign'       { (_, TokLowerName [] "foreign") }
-  'hiding'        { (_, TokLowerName [] "hiding") }
-  'import'        { (_, TokLowerName [] "import") }
-  'if'            { (_, TokLowerName [] "if") }
-  'in'            { (_, TokLowerName [] "in") }
-  'infix'         { (_, TokLowerName [] "infix") }
-  'infixl'        { (_, TokLowerName [] "infixl") }
-  'infixr'        { (_, TokLowerName [] "infixr") }
-  'instance'      { (_, TokLowerName [] "instance") }
-  'kind'          { (_, TokLowerName [] "kind") }
-  'let'           { (_, TokLowerName [] "let") }
-  'module'        { (_, TokLowerName [] "module") }
-  'newtype'       { (_, TokLowerName [] "newtype") }
-  'of'            { (_, TokLowerName [] "of") }
-  'then'          { (_, TokLowerName [] "then") }
-  'true'          { (_, TokLowerName [] "true") }
-  'type'          { (_, TokLowerName [] "type") }
-  'where'         { (_, TokLowerName [] "where") }
-  '(->)'          { (_, TokSymbolArr _) }
-  '(..)'          { (_, TokSymbolName [] "..") }
-  IDENT           { (_, TokLowerName [] _) }
-  QUAL_IDENT      { (_, TokLowerName _ _) }
-  PROPER          { (_, TokUpperName [] _) }
-  QUAL_PROPER     { (_, TokUpperName _ _) }
-  SYMBOL          { (_, TokSymbolName [] _) }
-  QUAL_SYMBOL     { (_, TokSymbolName _ _) }
-  OPERATOR        { (_, TokSymbol [] _) }
-  QUAL_OPERATOR   { (_, TokSymbol _ _) }
-  LIT_HOLE        { (_, TokHole _) }
-  LIT_CHAR        { (_, TokChar _ _) }
-  LIT_STRING      { (_, TokString _ _) }
-  LIT_RAW_STRING  { (_, TokRawString _) }
-  LIT_INT         { (_, TokInt _ _) }
-  LIT_NUMBER      { (_, TokNumber _ _) }
+  '('             { SourceToken _ TokLeftParen }
+  ')'             { SourceToken _ TokRightParen }
+  '{'             { SourceToken _ TokLeftBrace }
+  '}'             { SourceToken _ TokRightBrace }
+  '['             { SourceToken _ TokLeftSquare }
+  ']'             { SourceToken _ TokRightSquare }
+  '\{'            { SourceToken _ TokLayoutStart }
+  '\}'            { SourceToken _ TokLayoutEnd }
+  '\;'            { SourceToken _ TokLayoutSep }
+  '<-'            { SourceToken _ (TokLeftArrow _) }
+  '->'            { SourceToken _ (TokRightArrow _) }
+  '<='            { SourceToken _ (TokSymbol [] sym) | sym == "<=" || sym == "⇐" }
+  '=>'            { SourceToken _ (TokRightFatArrow _) }
+  ':'             { SourceToken _ (TokSymbol [] ":") }
+  '::'            { SourceToken _ (TokDoubleColon _) }
+  '='             { SourceToken _ TokEquals }
+  '|'             { SourceToken _ TokPipe }
+  '`'             { SourceToken _ TokTick }
+  '.'             { SourceToken _ TokDot }
+  ','             { SourceToken _ TokComma }
+  '_'             { SourceToken _ TokUnderscore }
+  '\\'            { SourceToken _ TokBackslash }
+  '-'             { SourceToken _ (TokSymbol [] "-") }
+  '@'             { SourceToken _ (TokSymbol [] "@") }
+  '#'             { SourceToken _ (TokSymbol [] "#") }
+  'ado'           { SourceToken _ (TokLowerName _ "ado") }
+  'as'            { SourceToken _ (TokLowerName [] "as") }
+  'case'          { SourceToken _ (TokLowerName [] "case") }
+  'class'         { SourceToken _ (TokLowerName [] "class") }
+  'data'          { SourceToken _ (TokLowerName [] "data") }
+  'derive'        { SourceToken _ (TokLowerName [] "derive") }
+  'do'            { SourceToken _ (TokLowerName _ "do") }
+  'else'          { SourceToken _ (TokLowerName [] "else") }
+  'false'         { SourceToken _ (TokLowerName [] "false") }
+  'forall'        { SourceToken _ (TokForall ASCII) }
+  'forallu'       { SourceToken _ (TokForall Unicode) }
+  'foreign'       { SourceToken _ (TokLowerName [] "foreign") }
+  'hiding'        { SourceToken _ (TokLowerName [] "hiding") }
+  'import'        { SourceToken _ (TokLowerName [] "import") }
+  'if'            { SourceToken _ (TokLowerName [] "if") }
+  'in'            { SourceToken _ (TokLowerName [] "in") }
+  'infix'         { SourceToken _ (TokLowerName [] "infix") }
+  'infixl'        { SourceToken _ (TokLowerName [] "infixl") }
+  'infixr'        { SourceToken _ (TokLowerName [] "infixr") }
+  'instance'      { SourceToken _ (TokLowerName [] "instance") }
+  'kind'          { SourceToken _ (TokLowerName [] "kind") }
+  'let'           { SourceToken _ (TokLowerName [] "let") }
+  'module'        { SourceToken _ (TokLowerName [] "module") }
+  'newtype'       { SourceToken _ (TokLowerName [] "newtype") }
+  'of'            { SourceToken _ (TokLowerName [] "of") }
+  'then'          { SourceToken _ (TokLowerName [] "then") }
+  'true'          { SourceToken _ (TokLowerName [] "true") }
+  'type'          { SourceToken _ (TokLowerName [] "type") }
+  'where'         { SourceToken _ (TokLowerName [] "where") }
+  '(->)'          { SourceToken _ (TokSymbolArr _) }
+  '(..)'          { SourceToken _ (TokSymbolName [] "..") }
+  IDENT           { SourceToken _ (TokLowerName [] _) }
+  QUAL_IDENT      { SourceToken _ (TokLowerName _ _) }
+  PROPER          { SourceToken _ (TokUpperName [] _) }
+  QUAL_PROPER     { SourceToken _ (TokUpperName _ _) }
+  SYMBOL          { SourceToken _ (TokSymbolName [] _) }
+  QUAL_SYMBOL     { SourceToken _ (TokSymbolName _ _) }
+  OPERATOR        { SourceToken _ (TokSymbol [] _) }
+  QUAL_OPERATOR   { SourceToken _ (TokSymbol _ _) }
+  LIT_HOLE        { SourceToken _ (TokHole _) }
+  LIT_CHAR        { SourceToken _ (TokChar _ _) }
+  LIT_STRING      { SourceToken _ (TokString _ _) }
+  LIT_RAW_STRING  { SourceToken _ (TokRawString _) }
+  LIT_INT         { SourceToken _ (TokInt _ _) }
+  LIT_NUMBER      { SourceToken _ (TokNumber _ _) }
 
 %%
 

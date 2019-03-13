@@ -54,7 +54,7 @@ printQual = Text.concat . map (<> ".")
 printTokens :: [SourceToken] -> Text
 printTokens toks = Text.concat (map pp toks)
   where
-  pp (TokenAnn _ leading trailing, tok) =
+  pp (SourceToken (TokenAnn _ leading trailing) tok) =
     Text.concat (map ppLc leading)
       <> printToken tok
       <> Text.concat (map ppTc trailing)

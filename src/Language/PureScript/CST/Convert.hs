@@ -52,13 +52,13 @@ widenLeft ann (sp, _) =
   )
 
 sourceAnnCommented :: String -> SourceToken -> SourceToken -> Pos.SourceAnn
-sourceAnnCommented fileName (ann1, _) (ann2, _) =
+sourceAnnCommented fileName (SourceToken ann1 _) (SourceToken ann2 _) =
   ( Pos.SourceSpan fileName (sourcePos $ srcStart $ tokRange ann1) (sourcePos $ srcEnd $ tokRange ann2)
   , comments $ tokLeadingComments ann1
   )
 
 sourceAnn :: String -> SourceToken -> SourceToken -> Pos.SourceAnn
-sourceAnn fileName (ann1, _) (ann2, _) =
+sourceAnn fileName (SourceToken ann1 _) (SourceToken ann2 _) =
   ( Pos.SourceSpan fileName (sourcePos $ srcStart $ tokRange ann1) (sourcePos $ srcEnd $ tokRange ann2)
   , []
   )
@@ -80,7 +80,7 @@ moduleName' :: Ident -> N.ModuleName
 moduleName' i = N.ModuleName $ N.ProperName <$> identQual i <> [identName i]
 
 qualified :: forall a. (Text -> a) -> Ident -> N.Qualified a
-qualified k i = N.Qualified (moduleName . snd $ identTok i) . k $ identName i
+qualified k i = N.Qualified (moduleName . tokValue $ identTok i) . k $ identName i
 
 properName :: forall a. Ident -> N.Qualified (N.ProperName a)
 properName = qualified N.ProperName
@@ -124,7 +124,7 @@ convertKind fileName = go
     KindRow _ tok a -> do
       let
         kind = go a
-        ann = widenLeft (fst tok) $ K.getAnnForKind kind
+        ann = widenLeft (tokAnn tok) $ K.getAnnForKind kind
       K.Row ann kind
     KindParens _ (Wrapped _ a _) ->
       go a
@@ -167,13 +167,13 @@ convertType fileName = go
     TypeForall _ kw bindings _ ty -> do
       let
         mkForAll a t = do
-          let ann' = widenLeft (fst $ identTok a) $ T.getAnnForType t
+          let ann' = widenLeft (tokAnn $ identTok a) $ T.getAnnForType t
           T.ForAll ann' (identName a) t Nothing
         -- TODO: fix forall in the compiler
         k (TypeVarKinded (Wrapped _ (Labeled a _ _) _)) = mkForAll a
         k (TypeVarName a) = mkForAll a
         ty' = foldr k (go ty) bindings
-        ann = widenLeft (fst kw) $ T.getAnnForType ty'
+        ann = widenLeft (tokAnn kw) $ T.getAnnForType ty'
       T.setAnnForType ann ty'
     TypeKinded _ ty _ kd -> do
       let
@@ -375,10 +375,10 @@ convertExpr fileName = go
       positioned ann . AST.Let AST.FromWhere (goLetBinding <$> bs) $ go a
     expr@(ExprDo _ (DoBlock kw stmts)) -> do
       let ann = uncurry (sourceAnnCommented fileName) $ exprRange expr
-      positioned ann . AST.Do (moduleName $ snd kw) $ goDoStatement <$> stmts
+      positioned ann . AST.Do (moduleName $ tokValue kw) $ goDoStatement <$> stmts
     expr@(ExprAdo _ (AdoBlock kw stms _ a)) -> do
       let ann = uncurry (sourceAnnCommented fileName) $ exprRange expr
-      positioned ann . AST.Ado (moduleName $ snd kw) (goDoStatement <$> stms) $ go a
+      positioned ann . AST.Ado (moduleName $ tokValue kw) (goDoStatement <$> stms) $ go a
 
 convertBinder :: String -> Binder a -> AST.Binder
 convertBinder fileName = go
@@ -477,7 +477,7 @@ convertDeclaration fileName decl = case decl of
       goSig (Labeled n _ ty) = do
         let
           ty' = convertType fileName ty
-          ann' = widenLeft (fst $ identTok n) $ T.getAnnForType ty'
+          ann' = widenLeft (tokAnn $ identTok n) $ T.getAnnForType ty'
         AST.TypeDeclaration $ AST.TypeDeclarationData ann' (N.Ident $ identName n) ty'
     pure $ AST.TypeClassDeclaration ann
       (N.ProperName $ identName name)
@@ -515,7 +515,7 @@ convertDeclaration fileName decl = case decl of
     pure $ convertValueBindingFields fileName ann fields
   DeclFixity _ (FixityFields kw (_, prec) mbTy name _ op) -> do
     let
-      assoc =  case snd kw of
+      assoc =  case tokValue kw of
         TokLowerName [] "infixr" -> AST.Infixr
         TokLowerName [] "infixl" -> AST.Infixl
         _ -> AST.Infix
@@ -523,7 +523,7 @@ convertDeclaration fileName decl = case decl of
     pure $ AST.FixityDeclaration ann $ case mbTy of
       Nothing -> do
         let
-          tok = snd $ identTok name
+          tok = tokValue $ identTok name
           name' = N.Qualified (moduleName tok) $ case tok of
             TokLowerName _ _ -> Left . N.Ident $ identName name
             _ -> Right $ N.ProperName $ identName name
@@ -557,7 +557,7 @@ convertSignature :: String -> Labeled (Type a) -> AST.Declaration
 convertSignature fileName (Labeled a _ b) = do
   let
     b' = convertType fileName b
-    ann = widenLeft (fst $ identTok a) $ T.getAnnForType b'
+    ann = widenLeft (tokAnn $ identTok a) $ T.getAnnForType b'
   AST.TypeDeclaration $ AST.TypeDeclarationData ann (N.Ident $ identName a) b'
 
 convertValueBindingFields :: String -> Pos.SourceAnn -> ValueBindingFields a -> AST.Declaration

@@ -100,7 +100,7 @@ widen :: SourceRange -> SourceRange -> SourceRange
 widen (SourceRange s1 _) (SourceRange _ e2) = SourceRange s1 e2
 
 srcRange :: SourceToken -> SourceRange
-srcRange = tokRange . fst
+srcRange = tokRange . tokAnn
 
 identRange :: Ident -> TokenRange
 identRange a = (identTok a, identTok a)

@@ -37,7 +37,7 @@ lex src = runParser (initialParserState src) (go mempty)
   where
   go acc = do
     tok <- munch
-    case snd tok of
+    case tokValue tok of
       TokEof -> pure $ DList.toList acc
       _      -> go (acc `DList.snoc` tok)
 
@@ -46,7 +46,7 @@ recover err k tok = do
   let revert = pushBack tok *> pure [tok]
   stk  <- getLayoutStack
   toks <-
-    case snd tok of
+    case tokValue tok of
       TokRightParen           -> revert
       TokRightBrace           -> revert
       TokRightSquare          -> revert
@@ -110,7 +110,7 @@ munch = Parser $ \state@(ParserState {..}) kerr ksucc ->
               , tokTrailingComments = trailing
               }
             (parserStack', toks) =
-              insertLayout (tokenAnn, tok) parserPos' parserStack
+              insertLayout (SourceToken tokenAnn tok) parserPos' parserStack
             state' = state
               { parserSource = parserSource'
               , parserBuff = tail toks

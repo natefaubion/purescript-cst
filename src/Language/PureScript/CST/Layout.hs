@@ -49,7 +49,7 @@ isTopDecl tokPos = \case
   _ -> False
 
 lytToken :: SourcePos -> Token -> SourceToken
-lytToken pos = (ann,)
+lytToken pos = SourceToken ann
   where
   ann = TokenAnn
     { tokRange = SourceRange pos pos
@@ -58,7 +58,7 @@ lytToken pos = (ann,)
     }
 
 insertLayout :: SourceToken -> SourcePos -> LayoutStack -> (LayoutStack, [SourceToken])
-insertLayout src@(tokAnn, tok) nextPos stack =
+insertLayout src@(SourceToken tokAnn tok) nextPos stack =
   DList.toList <$> insert (stack, mempty)
   where
   tokPos =

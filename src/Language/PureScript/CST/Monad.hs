@@ -102,7 +102,7 @@ runParser st (Parser k) = k st left right
 parseError :: SourceToken -> Parser a
 parseError tok = Parser $ \st kerr _ ->
   kerr st $ ParserError
-    { errRange = tokRange . fst $ tok
+    { errRange = tokRange . tokAnn $ tok
     , errToks = [tok]
     , errStack = parserStack st
     , errType = ErrToken
@@ -119,7 +119,7 @@ mkParserError stack toks ty =
   where
   range = case toks of
     [] -> SourceRange (SourcePos 0 0) (SourcePos 0 0)
-    _  -> widen (tokRange . fst $ head toks) (tokRange . fst $ last toks)
+    _  -> widen (tokRange . tokAnn $ head toks) (tokRange . tokAnn $ last toks)
 
 addFailure :: [SourceToken] -> ParserErrorType -> Parser ()
 addFailure toks ty = Parser $ \st _ ksucc ->
@@ -215,7 +215,7 @@ prettyPrintError (ParserError {..}) =
       "line " <> show line <> ", column " <> show col
 
   basicError = case errToks of
-    tok : _ -> basicTokError (snd tok)
+    tok : _ -> basicTokError (tokValue tok)
     [] -> "Unexpected input"
 
   basicTokError = \case
