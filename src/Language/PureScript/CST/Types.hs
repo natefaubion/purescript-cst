@@ -56,6 +56,8 @@ data Token
   | TokLowerName [Text] Text
   | TokUpperName [Text] Text
   | TokSymbol [Text] Text
+  | TokSymbolName [Text] Text
+  | TokSymbolArr SourceStyle
   | TokHole Text
   | TokChar Text Char
   | TokString Text Text
@@ -120,9 +122,9 @@ data Type a
   | TypeKinded a (Type a) SourceToken (Kind a)
   | TypeApp a (Type a) (Type a)
   | TypeOp a (Type a) Ident (Type a)
-  | TypeOpName a (Wrapped Ident)
+  | TypeOpName a Ident
   | TypeArr a (Type a) SourceToken (Type a)
-  | TypeArrName a (Wrapped SourceToken)
+  | TypeArrName a SourceToken
   | TypeConstrained a (Type a) SourceToken (Type a)
   | TypeParens a (Wrapped (Type a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -150,9 +152,9 @@ data Module a = Module
 
 data Export a
   = ExportValue a Ident
-  | ExportOp a (Wrapped Ident)
-  | ExportType a Ident (Maybe (Wrapped (Maybe (DataMembers a))))
-  | ExportTypeOp a SourceToken (Wrapped Ident)
+  | ExportOp a Ident
+  | ExportType a Ident (Maybe (DataMembers a))
+  | ExportTypeOp a SourceToken Ident
   | ExportClass a SourceToken Ident
   | ExportKind a SourceToken Ident
   | ExportModule a SourceToken Ident
@@ -160,7 +162,7 @@ data Export a
 
 data DataMembers a
   = DataAll a SourceToken
-  | DataEnumerated a (Separated Ident)
+  | DataEnumerated a (Delimited Ident)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 data Declaration a
@@ -196,9 +198,9 @@ data ImportDecl a = ImportDecl
 
 data Import a
   = ImportValue a Ident
-  | ImportOp a (Wrapped Ident)
-  | ImportType a Ident (Maybe (Wrapped (Maybe (DataMembers a))))
-  | ImportTypeOp a SourceToken (Wrapped Ident)
+  | ImportOp a Ident
+  | ImportType a Ident (Maybe (DataMembers a))
+  | ImportTypeOp a SourceToken Ident
   | ImportClass a SourceToken Ident
   | ImportKind a SourceToken Ident
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -291,7 +293,7 @@ data Expr a
   | ExprTyped a (Expr a) SourceToken (Type a)
   | ExprInfix a (Expr a) (Wrapped (Expr a)) (Expr a)
   | ExprOp a (Expr a) Ident (Expr a)
-  | ExprOpName a (Wrapped Ident)
+  | ExprOpName a Ident
   | ExprNegate a SourceToken (Expr a)
   | ExprRecordAccessor a (RecordAccessor a)
   | ExprRecordUpdate a (Expr a) (DelimitedNonEmpty (RecordUpdate a))

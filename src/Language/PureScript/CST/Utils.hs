@@ -9,6 +9,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Traversable (for)
 import Language.PureScript.CST.Monad
+import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Traversals.Type
 import Language.PureScript.CST.Types
 
@@ -51,11 +52,12 @@ internalError = error
 
 toIdent :: SourceToken -> Ident
 toIdent tok = case tok of
-  (_, TokLowerName q a) -> Ident tok q a
-  (_, TokUpperName q a) -> Ident tok q a
-  (_, TokSymbol q a)    -> Ident tok q a
-  (_, TokHole a)        -> Ident tok [] a
-  _                     -> internalError $ "Invalid identifier token: " <> show tok
+  (_, TokLowerName q a)  -> Ident tok q a
+  (_, TokUpperName q a)  -> Ident tok q a
+  (_, TokSymbolName q a) -> Ident tok q a
+  (_, TokSymbol q a)     -> Ident tok q a
+  (_, TokHole a)         -> Ident tok [] a
+  _                      -> internalError $ "Invalid identifier token: " <> show tok
 
 toVar :: SourceToken -> Parser Ident
 toVar tok = case tok of
@@ -152,7 +154,7 @@ toBinders = convert []
         ExprOp a' lhs' op' (ExprApp a'' rhs'' (ExprIdent a''' ident)) -> do
           rhs' <- toBinders rhs
           convert (BinderNamed (a <> a'' <> a''') ident tok (head rhs') : tail rhs' <> acc) $ ExprOp a' lhs' op' rhs''
-        _ -> parseFail (exprToken lhs) ErrExprInBinder
+        _ -> parseFail (fst $ exprRange lhs) ErrExprInBinder
     ExprOp a lhs op rhs -> do
       lhs' <- toBinder lhs
       rhs' <- toBinder rhs
@@ -160,7 +162,7 @@ toBinders = convert []
     ExprApp _ lhs rhs -> do
       rhs' <- toBinders rhs
       convert (rhs' <> acc) lhs
-    expr -> parseFail (exprToken expr) ErrExprInBinder
+    expr -> parseFail (fst $ exprRange expr) ErrExprInBinder
 
 toBinderAtoms :: forall a. Monoid a => Expr a -> Parser [Binder a]
 toBinderAtoms expr = do
@@ -168,7 +170,7 @@ toBinderAtoms expr = do
   for bs $ \b -> do
     let
       err = do
-        let toks = [binderToken b]
+        let toks = [fst $ binderRange b]
         addFailure toks ErrExprInBinder
         pure $ unexpectedBinder toks
     case b of
@@ -185,7 +187,7 @@ toBinder expr = do
       pure $ BinderNamed a ident tok $ BinderConstructor a' ctr args
     a : [] -> pure a
     _ : _ -> do
-      let toks = binderToken <$> bs
+      let toks = fst . binderRange <$> bs
       addFailure toks ErrExprInBinder
       pure $ unexpectedBinder toks
     [] -> internalError "Empty binder set"
@@ -198,7 +200,7 @@ toDeclOrBinder expr = do
     BinderConstructor a ident [] : args -> pure $ Right $ BinderConstructor a ident args
     a : [] -> pure $ Right $ a
     _ : _ -> do
-      let toks = binderToken <$> bs
+      let toks = fst . binderRange <$> bs
       addFailure toks ErrExprInDeclOrBinder
       pure $ Right $ unexpectedBinder toks
     [] -> internalError "Empty binder set"
@@ -216,7 +218,7 @@ toDecl ksucc kerr expr guarded = do
   case bs of
     BinderVar a ident : args -> pure $ ksucc a (ValueBindingFields ident args guarded)
     _ : _ -> do
-      let toks = (binderToken <$> bs)
+      let toks = fst . binderRange <$> bs
       addFailure toks ErrBinderInDecl
       pure $ kerr toks
     [] -> internalError "Empty binder set"
@@ -231,7 +233,7 @@ toRecordFields = \case
     Right . Separated a <$> traverse (traverse unRight) as
   where
   unLeft (Left tok) = pure tok
-  unLeft (Right tok) = parseFail (updateToken tok) ErrRecordUpdateInCtr
+  unLeft (Right tok) = parseFail (fst $ recordUpdateRange tok) ErrRecordUpdateInCtr
 
   unRight (Right tok) = pure tok
   unRight (Left (RecordPun (Ident tok _ _))) = parseFail tok ErrRecordPunInUpdate
@@ -331,53 +333,3 @@ reservedNames = Set.fromList
   , "type"
   , "where"
   ]
-
-exprToken :: Expr a -> SourceToken
-exprToken = \case
-  ExprHole _ a -> identTok a
-  ExprSection _ a -> a
-  ExprIdent _ a -> identTok a
-  ExprConstructor _ a -> identTok a
-  ExprBoolean _ a _ -> a
-  ExprChar _ a _ -> a
-  ExprString _ a _ -> a
-  ExprNumber _ a _ -> a
-  ExprArray _ a -> wrpOpen a
-  ExprRecord _ a -> wrpOpen a
-  ExprParens _ a -> wrpOpen a
-  ExprTyped _ a _ _ -> exprToken a
-  ExprInfix _ a _ _ -> exprToken a
-  ExprOp _ a _ _ -> exprToken a
-  ExprOpName _ a -> wrpOpen a
-  ExprNegate _ a _ -> a
-  ExprRecordAccessor _ a -> exprToken $ recExpr a
-  ExprRecordUpdate _ a _ -> exprToken a
-  ExprApp _ a _ -> exprToken a
-  ExprLambda _ a -> lmbSymbol a
-  ExprIf _ a -> iteIf a
-  ExprCase _ a -> caseKeyword a
-  ExprLet _ a -> letKeyword a
-  ExprWhere _ a -> exprToken $ whereBody a
-  ExprDo _ a -> doKeyword a
-  ExprAdo _ a -> adoKeyword a
-
-binderToken :: Binder a -> SourceToken
-binderToken = \case
-  BinderWildcard _ a -> a
-  BinderVar _ a -> identTok a
-  BinderNamed _ a _ _ -> identTok a
-  BinderConstructor _ a _ -> identTok a
-  BinderBoolean _ a _ -> a
-  BinderChar _ a _ -> a
-  BinderString _ a _ -> a
-  BinderNumber _ mba a _ -> maybe a id mba
-  BinderArray _ a -> wrpOpen a
-  BinderRecord _ a -> wrpOpen a
-  BinderParens _ a -> wrpOpen a
-  BinderTyped _ a _ _ -> binderToken a
-  BinderOp _ a _ _ -> binderToken a
-
-updateToken :: RecordUpdate a -> SourceToken
-updateToken = \case
-  RecordUpdateLeaf a _ _ -> identTok a
-  RecordUpdateBranch a _ -> identTok a

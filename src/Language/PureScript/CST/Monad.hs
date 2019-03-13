@@ -37,6 +37,7 @@ data ParserErrorType
   | ErrNumberOutOfRange
   | ErrLeadingZero
   | ErrExpectedExponent
+  | ErrQualifiedArr
   | ErrLexeme (Maybe String) [String]
   | ErrEof
   deriving (Show, Eq, Ord)
@@ -184,12 +185,6 @@ prettyPrintError (ParserError {..}) =
       "Illegal whitespace character " <> show hd
     ErrLexeme (Just a) _ ->
       "Unexpected " <> a
-    ErrLexeme _ _ ->
-      basicError
-    ErrLetBinding ->
-      basicError
-    ErrToken ->
-      basicError
     ErrLineFeedInString ->
       "Unexpected line feed in string literal"
     ErrAstralCodePointInChar ->
@@ -202,6 +197,14 @@ prettyPrintError (ParserError {..}) =
       "Unexpected leading zeros"
     ErrExpectedExponent ->
       "Expected exponent"
+    ErrQualifiedArr ->
+      "Unexpected qualified function arrow"
+    ErrLexeme _ _ ->
+      basicError
+    ErrLetBinding ->
+      basicError
+    ErrToken ->
+      basicError
     ErrExpr ->
       basicError
     ErrDecl ->

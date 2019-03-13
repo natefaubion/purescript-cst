@@ -44,7 +44,10 @@ tokenDelta = \case
   TokBackslash             -> (0, 1)
   TokLowerName qual name   -> (0, qualDelta qual + Text.length name)
   TokUpperName qual name   -> (0, qualDelta qual + Text.length name)
+  TokSymbolName qual sym   -> (0, qualDelta qual + Text.length sym + 2)
   TokSymbol qual sym       -> (0, qualDelta qual + Text.length sym)
+  TokSymbolArr Unicode     -> (0, 3)
+  TokSymbolArr ASCII       -> (0, 4)
   TokHole hole             -> (0, Text.length hole + 1)
   TokChar raw _            -> (0, Text.length raw + 2)
   TokInt raw _             -> (0, Text.length raw)
@@ -115,11 +118,11 @@ moduleRange (Module { modKeyword, modWhere, modImports, modDecls }) =
 exportRange :: Export a -> TokenRange
 exportRange = \case
   ExportValue _ a -> identRange a
-  ExportOp _ a -> wrappedRange a
+  ExportOp _ a -> identRange a
   ExportType _ a b
-    | Just (Wrapped _ _ b') <- b -> (identTok a, b')
+    | Just b' <- b -> (identTok a, snd $ dataMembersRange b')
     | otherwise -> identRange a
-  ExportTypeOp _ a (Wrapped _ _ b) -> (a, b)
+  ExportTypeOp _ a b -> (a, identTok b)
   ExportClass _ a b -> (a, identTok b)
   ExportKind _ a b -> (a, identTok b)
   ExportModule _ a b -> (a, identTok b)
@@ -133,13 +136,18 @@ importDeclRange (ImportDecl { impKeyword, impModule, impNames, impQual })
 importRange :: Import a -> TokenRange
 importRange = \case
   ImportValue _ a -> identRange a
-  ImportOp _ a -> wrappedRange a
+  ImportOp _ a -> identRange a
   ImportType _ a b
-    | Just (Wrapped _ _ b') <- b -> (identTok a, b')
+    | Just b' <- b -> (identTok a, snd $ dataMembersRange b')
     | otherwise -> identRange a
-  ImportTypeOp _ a (Wrapped _ _ b) -> (a, b)
+  ImportTypeOp _ a b -> (a, identTok b)
   ImportClass _ a b -> (a, identTok b)
   ImportKind _ a b -> (a, identTok b)
+
+dataMembersRange :: DataMembers a -> TokenRange
+dataMembersRange = \case
+  DataAll _ a -> (a, a)
+  DataEnumerated _ (Wrapped a _ b) -> (a, b)
 
 declRange :: Declaration a -> TokenRange
 declRange = \case
@@ -238,9 +246,9 @@ typeRange = \case
   TypeKinded _ a _ b -> (fst $ typeRange a, snd $ kindRange b)
   TypeApp _ a b -> (fst $ typeRange a, snd $ typeRange b)
   TypeOp _ a _ b -> (fst $ typeRange a, snd $ typeRange b)
-  TypeOpName _ a -> wrappedRange a
+  TypeOpName _ a -> identRange a
   TypeArr _ a _ b -> (fst $ typeRange a, snd $ typeRange b)
-  TypeArrName _ a -> wrappedRange a
+  TypeArrName _ a -> (a, a)
   TypeConstrained _ a _ b -> (fst $ typeRange a, snd $ typeRange b)
   TypeParens _ a -> wrappedRange a
 
@@ -265,7 +273,7 @@ exprRange = \case
   ExprTyped _ a _ b -> (fst $ exprRange a, snd $ typeRange b)
   ExprInfix _ a _ b -> (fst $ exprRange a, snd $ exprRange b)
   ExprOp _ a _ b -> (fst $ exprRange a, snd $ exprRange b)
-  ExprOpName _ a -> wrappedRange a
+  ExprOpName _ a -> identRange a
   ExprNegate _ a b -> (a, snd $ exprRange b)
   ExprRecordAccessor _ (RecordAccessor a _ b) -> (fst $ exprRange a, identTok $ sepLast b)
   ExprRecordUpdate _ a b -> (fst $ exprRange a, snd $ wrappedRange b)
@@ -314,3 +322,8 @@ binderRange = \case
   BinderParens _ a -> wrappedRange a
   BinderTyped _ a _ b -> (fst $ binderRange a, snd $ typeRange b)
   BinderOp _ a _ b -> (fst $ binderRange a, snd $ binderRange b)
+
+recordUpdateRange :: RecordUpdate a -> TokenRange
+recordUpdateRange = \case
+  RecordUpdateLeaf a _ b -> (identTok a, snd $ exprRange b)
+  RecordUpdateBranch a (Wrapped _ _ b) -> (identTok a, b)

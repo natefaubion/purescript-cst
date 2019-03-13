@@ -76,6 +76,16 @@ main = do
           IO.putStrLn $ CST.printTokens toks
     exitSuccess
 
+  when ("--old" `elem` args) $ do
+    for_ filePaths $ \path -> do
+      src <- IO.readFile path
+      case Parser.parseModuleFromFile id (path, src) of
+        Left err -> putStrLn $ show err
+        Right (_, b) -> do
+          putStrLn $ check <> " " <> path
+          pPrint b
+    exitSuccess
+
   mbModules <- forConcurrently filePaths $ \path -> do
     src <- IO.readFile path
     let
@@ -118,13 +128,6 @@ main = do
         for_ ms $ \(path, _, _, b) -> do
           putStrLn $ check <> " " <> path
           pPrint b
-      else if "--old" `elem` args then
-        for_ ms $ \(path, src, _, _) ->
-          case Parser.parseModuleFromFile id (path, src) of
-            Left err -> putStrLn $ show err
-            Right (_, b) -> do
-              putStrLn $ check <> " " <> path
-              pPrint b
       else
         for_ ms $ \(path, _, _, _) -> do
           putStrLn $ check <> " " <> path

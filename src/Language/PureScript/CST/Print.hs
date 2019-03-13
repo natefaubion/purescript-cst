@@ -33,7 +33,10 @@ printToken = \case
   TokBackslash             -> "\\"
   TokLowerName qual name   -> printQual qual <> name
   TokUpperName qual name   -> printQual qual <> name
+  TokSymbolName qual sym   -> printQual qual <> "(" <> sym <> ")"
   TokSymbol qual sym       -> printQual qual <> sym
+  TokSymbolArr Unicode     -> "(→)"
+  TokSymbolArr ASCII       -> "(->)"
   TokHole hole             -> "?" <> hole
   TokChar raw _            -> "'" <> raw <> "'"
   TokString raw _          -> "\"" <> raw <> "\""

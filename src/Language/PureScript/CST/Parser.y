@@ -13,6 +13,7 @@ import Data.Foldable (foldl', for_)
 import Data.Text (Text)
 import Language.PureScript.CST.Lexer
 import Language.PureScript.CST.Monad
+import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Types
 import Language.PureScript.CST.Utils
 }
@@ -52,7 +53,6 @@ import Language.PureScript.CST.Utils
   '-'             { (_, TokSymbol [] "-") }
   '@'             { (_, TokSymbol [] "@") }
   '#'             { (_, TokSymbol [] "#") }
-  '..'            { (_, TokSymbol [] "..") }
   'ado'           { (_, TokLowerName _ "ado") }
   'as'            { (_, TokLowerName [] "as") }
   'case'          { (_, TokLowerName [] "case") }
@@ -82,11 +82,16 @@ import Language.PureScript.CST.Utils
   'true'          { (_, TokLowerName [] "true") }
   'type'          { (_, TokLowerName [] "type") }
   'where'         { (_, TokLowerName [] "where") }
+  '(->)'          { (_, TokSymbolArr _) }
+  '(..)'          { (_, TokSymbolName [] "..") }
   IDENT           { (_, TokLowerName [] _) }
   QUAL_IDENT      { (_, TokLowerName _ _) }
   PROPER          { (_, TokUpperName [] _) }
   QUAL_PROPER     { (_, TokUpperName _ _) }
-  SYMBOL          { (_, TokSymbol _ _) }
+  SYMBOL          { (_, TokSymbolName [] _) }
+  QUAL_SYMBOL     { (_, TokSymbolName _ _) }
+  OPERATOR        { (_, TokSymbol [] _) }
+  QUAL_OPERATOR   { (_, TokSymbol _ _) }
   LIT_HOLE        { (_, TokHole _) }
   LIT_CHAR        { (_, TokChar _ _) }
   LIT_STRING      { (_, TokString _ _) }
@@ -149,14 +154,25 @@ var :: { Ident }
   | 'kind' {% toVar $1 }
   | 'hiding' { toIdent $1 }
 
-symbol :: { Ident }
-  : SYMBOL { toSymbol $1 }
+op :: { Ident }
+  : OPERATOR { toSymbol $1 }
   | '<=' { toSymbol $1 }
   | '-' { toSymbol $1 }
   | '@' { toSymbol $1 }
   | '#' { toSymbol $1 }
   | ':' { toSymbol $1 }
-  | '..' { toSymbol $1 }
+
+opIdent :: { Ident }
+  : op { $1 }
+  | QUAL_OPERATOR { toSymbol $1 }
+
+symbol :: { Ident }
+  : SYMBOL { toIdent $1 }
+  | '(..)' { toIdent $1 }
+
+symbolIdent :: { Ident }
+  : symbol { $1 }
+  | QUAL_SYMBOL { toIdent $1 }
 
 label :: { Ident }
   : IDENT { toLabel $1 }
@@ -232,7 +248,7 @@ type0 :: { Type () }
 
 type1 :: { Type () }
   : type2 { $1 }
-  | type1 symbol type2 { TypeOp () $1 $2 $3 }
+  | type1 opIdent type2 { TypeOp () $1 $2 $3 }
 
 type2 :: { Type () }
   : typeAtom { $1 }
@@ -242,18 +258,19 @@ typeAtom :: { Type ()}
   : '_' { TypeWildcard () $1 }
   | var { TypeVar () $1 }
   | properIdent { TypeConstructor () $1 }
+  | symbolIdent { TypeOpName () $1 }
   | string { uncurry (TypeString ()) $1 }
   | hole { TypeHole () $1 }
+  | '(->)' { TypeArrName () $1 }
   | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
   | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
-  | '(' '->' ')' { TypeArrName () (Wrapped $1 $2 $3) }
-  | '(' symbol ')' { TypeOpName () (Wrapped $1 $2 $3) }
   | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
   | '(' typeKindedAtom '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
 
 typeKindedAtom :: { Type () }
   : '_' { TypeWildcard () $1 }
   | properIdent { TypeConstructor () $1 }
+  | symbolIdent { TypeOpName () $1 }
   | hole { TypeHole () $1 }
   | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
   | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
@@ -287,7 +304,7 @@ expr :: { Expr () }
 
 expr0 :: { Expr () }
   : expr1 { $1 }
-  | expr0 symbol expr1 { ExprOp () $1 $2 $3 }
+  | expr0 opIdent expr1 { ExprOp () $1 $2 $3 }
 
 expr1 :: { Expr () }
   : expr2 { $1 }
@@ -295,7 +312,7 @@ expr1 :: { Expr () }
 
 exprBacktick :: { Expr () }
   : expr2 { $1 }
-  | exprBacktick symbol expr2 { ExprOp () $1 $2 $3 }
+  | exprBacktick opIdent expr2 { ExprOp () $1 $2 $3 }
 
 expr2 :: { Expr () }
   : expr3 { $1 }
@@ -347,14 +364,13 @@ exprAtom :: { Expr () }
   | hole { ExprHole () $1 }
   | ident { ExprIdent () $1 }
   | properIdent { ExprConstructor () $1 }
+  | symbolIdent { ExprOpName () $1 }
   | boolean { uncurry (ExprBoolean ()) $1 }
   | char { uncurry (ExprChar ()) $1 }
   | string { uncurry (ExprString ()) $1 }
   | number { uncurry (ExprNumber ()) $1 }
   | array { ExprArray () $1 }
   | record { ExprRecord () $1 }
-  | '(' symbol ')' { ExprOpName () (Wrapped $1 $2 $3) }
-  | '(' symbol error {%% recover ErrExpr unexpectedExpr }
   | '(' expr ')' { ExprParens () (Wrapped $1 $2 $3) }
   | error {%% recover ErrExpr unexpectedExpr }
 
@@ -382,7 +398,7 @@ recordUpdate :: { RecordUpdate () }
 letBinding :: { LetBinding () }
   : var '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
   | expr0 guarded('=') {% toLetBinding $1 $2 }
-  | expr0 {%% recover ErrLetBinding (unexpectedLetBinding . (exprToken $1 :)) }
+  | expr0 {%% recover ErrLetBinding (unexpectedLetBinding . (fst (exprRange $1) :)) }
 
 caseBranch :: { (Separated (Binder ()), Guarded ()) }
   : sep(expr0, ',') guarded('->') {% do bs <- traverse toBinder $1; pure (bs, $2) }
@@ -423,18 +439,18 @@ exports :: { Maybe (DelimitedNonEmpty (Export ())) }
 
 export :: { Export () }
   : var { ExportValue () $1 }
-  | '(' symbol ')' { ExportOp () (Wrapped $1 $2 $3) }
+  | symbol { ExportOp () $1 }
   | proper { ExportType () $1 Nothing }
   | proper dataMembers { ExportType () $1 (Just $2) }
-  | 'type' '(' symbol ')' { ExportTypeOp () $1 (Wrapped $2 $3 $4) }
+  | 'type' symbol { ExportTypeOp () $1 $2 }
   | 'class' proper { ExportClass () $1 $2 }
   | 'kind' proper { ExportKind () $1 $2 }
   | 'module' properIdent { ExportModule () $1 $2 }
 
-dataMembers :: { Wrapped (Maybe (DataMembers ())) }
- : '(' ')' { Wrapped $1 Nothing $2 }
- | '(' '..' ')' { Wrapped $1 (Just (DataAll () $2)) $3 }
- | '(' sep(proper, ',') ')' { Wrapped $1 (Just (DataEnumerated () $2)) $3 }
+dataMembers :: { (DataMembers ()) }
+ : '(..)' { DataAll () $1 }
+ | '(' ')' { DataEnumerated () (Wrapped $1 Nothing $2) }
+ | '(' sep(proper, ',') ')' { DataEnumerated () (Wrapped $1 (Just $2) $3) }
 
 importDecl :: { ImportDecl () }
   : 'import' properIdent imports { ImportDecl () $1 $2 $3 Nothing }
@@ -447,10 +463,10 @@ imports :: { Maybe (Maybe SourceToken, DelimitedNonEmpty (Import ())) }
 
 import :: { Import () }
   : var { ImportValue () $1 }
-  | '(' symbol ')' { ImportOp () (Wrapped $1 $2 $3) }
+  | symbol { ImportOp () $1 }
   | proper { ImportType () $1 Nothing }
   | proper dataMembers { ImportType () $1 (Just $2) }
-  | 'type' '(' symbol ')' { ImportTypeOp () $1 (Wrapped $2 $3 $4) }
+  | 'type' symbol { ImportTypeOp () $1 $2 }
   | 'class' proper { ImportClass () $1 $2 }
   | 'kind' proper { ImportKind () $1 $2 }
 
@@ -471,7 +487,7 @@ decl :: { Declaration () }
   | expr0 guarded('=') {% toDecl DeclValue unexpectedDecl $1 $2 }
   | fixity { DeclFixity () $1 }
   | 'foreign' 'import' foreign { DeclForeign () $1 $2 $3 }
-  | expr0 error {%% recover ErrExprInDecl (unexpectedDecl . (exprToken $1 :)) }
+  | expr0 error {%% recover ErrExprInDecl (unexpectedDecl . (fst (exprRange $1) :)) }
   | error {%% recover ErrDecl unexpectedDecl }
 
 dataHead :: { DataHead () }
@@ -534,9 +550,9 @@ instBinding :: { InstanceBinding () }
   | expr0 guarded('=') {% toDecl InstanceBindingName unexpectedInstBinding $1 $2 }
 
 fixity :: { FixityFields () }
-  : infix int var 'as' symbol { FixityFields $1 $2 Nothing $3 $4 $5 }
-  | infix int proper 'as' symbol { FixityFields $1 $2 Nothing $3 $4 $5 }
-  | infix int 'type' proper 'as' symbol { FixityFields $1 $2 (Just $3) $4 $5 $6 }
+  : infix int var 'as' op { FixityFields $1 $2 Nothing $3 $4 $5 }
+  | infix int proper 'as' op { FixityFields $1 $2 Nothing $3 $4 $5 }
+  | infix int 'type' proper 'as' op { FixityFields $1 $2 (Just $3) $4 $5 $6 }
 
 infix :: { SourceToken }
   : 'infix' { $1 }

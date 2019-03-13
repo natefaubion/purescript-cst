@@ -199,8 +199,9 @@ convertType fileName = go
           TypeOp _ a op b -> loop (reassoc op (k b)) a
           expr' -> k expr'
       loop go ty
-    TypeOpName _ (Wrapped a op b) ->
-      T.TypeOp (sourceAnnCommented fileName a b) (typeOp op)
+    TypeOpName _ op -> do
+      let rng = identRange op
+      T.TypeOp (uncurry (sourceAnnCommented fileName) rng) (typeOp op)
     TypeArr _ a arr b -> do
       let
         a' = go a
@@ -208,8 +209,8 @@ convertType fileName = go
         arr' = Env.tyFunction $> sourceAnnCommented fileName arr arr
         ann = Pos.widenSourceAnn (T.getAnnForType a') (T.getAnnForType b')
       T.TypeApp ann (T.TypeApp ann arr' a') b'
-    TypeArrName _ (Wrapped a _ b) ->
-      Env.tyFunction $> sourceAnnCommented fileName a b
+    TypeArrName _ a ->
+      Env.tyFunction $> sourceAnnCommented fileName a a
     TypeConstrained _ a _ b -> do
       let
         a' = go a
@@ -328,9 +329,11 @@ convertExpr fileName = go
           ExprOp _ a op b -> loop (reassoc op (k b)) a
           expr' -> k expr'
       positioned ann $ loop go expr
-    ExprOpName _ (Wrapped a op b) -> do
-      let op' = AST.Op (sourceSpan fileName . toSourceRange $ identRange op) $ valueOp op
-      positioned (sourceAnnCommented fileName a b) $ AST.Parens op'
+    ExprOpName _ op -> do
+      let
+        rng = identRange op
+        op' = AST.Op (sourceSpan fileName $ toSourceRange rng) $ valueOp op
+      positioned (uncurry (sourceAnnCommented fileName) rng) op'
     expr@(ExprNegate _ _ b) -> do
       let ann = uncurry (sourceAnnCommented fileName) $ exprRange expr
       positioned ann . AST.UnaryMinus (fst ann) $ go b
@@ -581,18 +584,18 @@ convertImport :: String -> Import a -> AST.DeclarationRef
 convertImport fileName imp = case imp of
   ImportValue _ a ->
     AST.ValueRef ann . N.Ident $ identName a
-  ImportOp _ (Wrapped _ a _ ) ->
+  ImportOp _ a ->
     AST.ValueOpRef ann . N.OpName $ identName a
   ImportType _ a mb -> do
     let
       ctrs = case mb of
         Nothing -> Just []
-        Just (Wrapped _ Nothing _) -> Just []
-        Just (Wrapped _ (Just (DataAll _ _)) _) -> Nothing
-        Just (Wrapped _ (Just (DataEnumerated _ idents)) _) ->
+        Just (DataAll _ _) -> Nothing
+        Just (DataEnumerated _ (Wrapped _ Nothing _)) -> Just []
+        Just (DataEnumerated _ (Wrapped _ (Just idents) _)) ->
           Just . map (N.ProperName . identName) $ toList idents
     AST.TypeRef ann (N.ProperName $ identName a) ctrs
-  ImportTypeOp _ _ (Wrapped _ a _) ->
+  ImportTypeOp _ _ a ->
     AST.TypeOpRef ann . N.OpName $ identName a
   ImportClass _ _ a ->
     AST.TypeClassRef ann . N.ProperName $ identName a
@@ -605,18 +608,18 @@ convertExport :: String -> Export a -> AST.DeclarationRef
 convertExport fileName export = case export of
   ExportValue _ a ->
     AST.ValueRef ann . N.Ident $ identName a
-  ExportOp _ (Wrapped _ a _ ) ->
+  ExportOp _ a ->
     AST.ValueOpRef ann . N.OpName $ identName a
   ExportType _ a mb -> do
     let
       ctrs = case mb of
         Nothing -> Just []
-        Just (Wrapped _ Nothing _) -> Just []
-        Just (Wrapped _ (Just (DataAll _ _)) _) -> Nothing
-        Just (Wrapped _ (Just (DataEnumerated _ idents)) _) ->
+        Just (DataAll _ _) -> Nothing
+        Just (DataEnumerated _ (Wrapped _ Nothing _)) -> Just []
+        Just (DataEnumerated _ (Wrapped _ (Just idents) _)) ->
           Just . map (N.ProperName . identName) $ toList idents
     AST.TypeRef ann (N.ProperName $ identName a) ctrs
-  ExportTypeOp _ _ (Wrapped _ a _) ->
+  ExportTypeOp _ _ a ->
     AST.TypeOpRef ann . N.OpName $ identName a
   ExportClass _ _ a ->
     AST.TypeClassRef ann . N.ProperName $ identName a

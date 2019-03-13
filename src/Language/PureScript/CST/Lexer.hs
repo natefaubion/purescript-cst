@@ -137,6 +137,16 @@ next :: Lexer ()
 next = Parser $ \inp _ ksucc ->
   ksucc (Text.drop 1 inp) ()
 
+{-# INLINE nextIs #-}
+nextIs :: Char -> Lexer ()
+nextIs ch1 = Parser $ \inp kerr ksucc ->
+  case Text.uncons inp of
+    Just (ch2, inp')
+      | ch1 == ch2 -> ksucc inp' ()
+      | otherwise  -> kerr inp $ ErrLexeme (Just [ch2]) []
+    Nothing ->
+      kerr inp ErrEof
+
 {-# INLINE nextWhile #-}
 nextWhile :: (Char -> Bool) -> Lexer Text
 nextWhile p = Parser $ \inp _ ksucc -> do
@@ -242,7 +252,7 @@ token :: Lexer Token
 token = peek >>= maybe (pure TokEof) k0
   where
   k0 ch1 = case ch1 of
-    '('  -> next $> TokLeftParen
+    '('  -> next *> leftParen
     ')'  -> next $> TokRightParen
     '{'  -> next $> TokLeftBrace
     '}'  -> next $> TokRightBrace
@@ -308,6 +318,30 @@ token = peek >>= maybe (pure TokEof) k0
       _ ->
         ksucc inp $ pure tok1
 
+  leftParen :: Lexer Token
+  leftParen = Parser $ \inp _ ksucc ->
+    case Text.span isSymbolChar inp of
+      (chs, inp2)
+        | Text.null chs -> ksucc inp TokLeftParen
+        | otherwise ->
+            case Text.uncons inp2 of
+              Just (')', inp3) ->
+                case chs of
+                  "→"  -> ksucc inp3 $ TokSymbolArr Unicode
+                  "->" -> ksucc inp3 $ TokSymbolArr ASCII
+                  _    -> ksucc inp3 $ TokSymbolName [] chs
+              _ -> ksucc inp TokLeftParen
+
+  symbolParen :: [Text] -> Lexer Token
+  symbolParen qual = restore (== ErrQualifiedArr) $ peek >>= \case
+    Just ch | isSymbolChar ch ->
+      nextWhile isSymbolChar >>= \case
+        "→"  -> throw ErrQualifiedArr
+        "->" -> throw ErrQualifiedArr
+        sym  -> nextIs ')' $> TokSymbolName qual sym
+    Just ch -> throw $ ErrLexeme (Just [ch]) []
+    Nothing -> throw ErrEof
+
   symbol :: [Text] -> [Char] -> Lexer Token
   symbol qual pre = do
     rest <- nextWhile isSymbolChar
@@ -322,6 +356,7 @@ token = peek >>= maybe (pure TokEof) k0
       Just '.' -> do
         let qual' = name : qual
         next *> peek >>= \case
+          Just '(' -> next *> symbolParen qual'
           Just ch2
             | Char.isUpper ch2 -> next *> upper qual' ch2
             | isIdentStart ch2 -> next *> lower qual' ch2
