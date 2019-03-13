@@ -8,6 +8,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Traversable (for)
+import Language.PureScript.CST.Errors
 import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Traversals.Type

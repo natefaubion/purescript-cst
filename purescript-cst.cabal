@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: fd96e0b67a2e7a9ab90be5f34185bb2f919626e5471ad4322b26d87d9084a74d
+-- hash: 1e42d1d28abc402cc9e87fa2aea472ed5adbe23f1624e524fd3945c2d3a034bf
 
 name:           purescript-cst
 version:        0.1.0.0
@@ -26,6 +26,7 @@ library
   exposed-modules:
       Language.PureScript.CST
       Language.PureScript.CST.Convert
+      Language.PureScript.CST.Errors
       Language.PureScript.CST.Layout
       Language.PureScript.CST.Lexer
       Language.PureScript.CST.Monad

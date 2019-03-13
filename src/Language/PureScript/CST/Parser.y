@@ -11,6 +11,7 @@ import Prelude
 
 import Data.Foldable (foldl', for_)
 import Data.Text (Text)
+import Language.PureScript.CST.Errors
 import Language.PureScript.CST.Lexer
 import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Positions

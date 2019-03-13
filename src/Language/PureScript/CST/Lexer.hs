@@ -15,6 +15,7 @@ import Data.Functor (($>))
 import qualified Data.Scientific as Sci
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Language.PureScript.CST.Errors
 import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Layout
 import Language.PureScript.CST.Positions
@@ -310,8 +311,6 @@ token = peek >>= maybe (pure TokEof) k0
 
   leftParen :: Lexer Token
   leftParen = Parser $ \inp kerr ksucc ->
-    -- We need to check for symbolic names like `(<>)` because we lex them as
-    -- a single token.
     case Text.span isSymbolChar inp of
       (chs, inp2)
         | Text.null chs -> ksucc inp TokLeftParen

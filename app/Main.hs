@@ -10,15 +10,14 @@ import Criterion.Main.Options (Mode(..), MatchType(..), defaultConfig)
 import Data.Foldable (for_, foldl', find)
 import qualified Data.Text.IO as IO
 import qualified Language.PureScript.CST.Convert as CST
+import qualified Language.PureScript.CST.Errors as CST
 import qualified Language.PureScript.CST.Lexer as CST
-import qualified Language.PureScript.CST.Monad as CST
 import qualified Language.PureScript.CST.Parser as CST
 import qualified Language.PureScript.CST.Print as CST
 import qualified Language.PureScript.Errors as Errs
 import qualified Language.PureScript.Make as Make
 import qualified Language.PureScript.Names as Names
 import qualified Language.PureScript.Parser.Declarations as Parser
-import qualified Language.PureScript.Parser.Lexer as Lexer
 import Language.PureScript.Options (defaultOptions)
 import System.Environment (getArgs)
 import System.Exit (die, exitFailure, exitSuccess)
