@@ -137,16 +137,6 @@ next :: Lexer ()
 next = Parser $ \inp _ ksucc ->
   ksucc (Text.drop 1 inp) ()
 
-{-# INLINE nextIs #-}
-nextIs :: Char -> Lexer ()
-nextIs ch1 = Parser $ \inp kerr ksucc ->
-  case Text.uncons inp of
-    Just (ch2, inp')
-      | ch1 == ch2 -> ksucc inp' ()
-      | otherwise  -> kerr inp $ ErrLexeme (Just [ch2]) []
-    Nothing ->
-      kerr inp ErrEof
-
 {-# INLINE nextWhile #-}
 nextWhile :: (Char -> Bool) -> Lexer Text
 nextWhile p = Parser $ \inp _ ksucc -> do
@@ -338,7 +328,10 @@ token = peek >>= maybe (pure TokEof) k0
       nextWhile isSymbolChar >>= \case
         "→"  -> throw ErrQualifiedArr
         "->" -> throw ErrQualifiedArr
-        sym  -> nextIs ')' $> TokSymbolName qual sym
+        sym  -> peek >>= \case
+          Just ')' -> next $> TokSymbolName qual sym
+          Just ch2 -> throw $ ErrLexeme (Just [ch2]) []
+          Nothing  -> throw ErrEof
     Just ch -> throw $ ErrLexeme (Just [ch]) []
     Nothing -> throw ErrEof
 
