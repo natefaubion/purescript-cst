@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 1e42d1d28abc402cc9e87fa2aea472ed5adbe23f1624e524fd3945c2d3a034bf
+-- hash: 4628a2ef8808b8d6029e3a9c0b0a82502e9e834abfc57edc206691a00bac1d64
 
 name:           purescript-cst
 version:        0.1.0.0
@@ -90,7 +90,7 @@ executable purescript-cst-exe
 
 test-suite purescript-cst-test
   type: exitcode-stdio-1.0
-  main-is: Spec.hs
+  main-is: Main.hs
   other-modules:
       Paths_purescript_cst
   hs-source-dirs:
@@ -102,10 +102,12 @@ test-suite purescript-cst-test
     , array
     , async
     , base >=4.7 && <5
+    , bytestring
     , containers
     , criterion
     , deepseq
     , dlist
+    , filepath
     , megaparsec ==7.0.4
     , mtl
     , pretty-simple
@@ -113,5 +115,7 @@ test-suite purescript-cst-test
     , purescript ==0.12.2
     , purescript-cst
     , scientific
+    , tasty
+    , tasty-golden
     , text
   default-language: Haskell2010
