@@ -40,9 +40,9 @@ import Language.PureScript.CST.Utils
   '\;'            { SourceToken _ TokLayoutSep }
   '<-'            { SourceToken _ (TokLeftArrow _) }
   '->'            { SourceToken _ (TokRightArrow _) }
-  '<='            { SourceToken _ (TokSymbol [] sym) | sym == "<=" || sym == "⇐" }
+  '<='            { SourceToken _ (TokOperator [] sym) | sym == "<=" || sym == "⇐" }
   '=>'            { SourceToken _ (TokRightFatArrow _) }
-  ':'             { SourceToken _ (TokSymbol [] ":") }
+  ':'             { SourceToken _ (TokOperator [] ":") }
   '::'            { SourceToken _ (TokDoubleColon _) }
   '='             { SourceToken _ TokEquals }
   '|'             { SourceToken _ TokPipe }
@@ -51,9 +51,9 @@ import Language.PureScript.CST.Utils
   ','             { SourceToken _ TokComma }
   '_'             { SourceToken _ TokUnderscore }
   '\\'            { SourceToken _ TokBackslash }
-  '-'             { SourceToken _ (TokSymbol [] "-") }
-  '@'             { SourceToken _ (TokSymbol [] "@") }
-  '#'             { SourceToken _ (TokSymbol [] "#") }
+  '-'             { SourceToken _ (TokOperator [] "-") }
+  '@'             { SourceToken _ (TokOperator [] "@") }
+  '#'             { SourceToken _ (TokOperator [] "#") }
   'ado'           { SourceToken _ (TokLowerName _ "ado") }
   'as'            { SourceToken _ (TokLowerName [] "as") }
   'case'          { SourceToken _ (TokLowerName [] "case") }
@@ -91,8 +91,8 @@ import Language.PureScript.CST.Utils
   QUAL_PROPER     { SourceToken _ (TokUpperName _ _) }
   SYMBOL          { SourceToken _ (TokSymbolName [] _) }
   QUAL_SYMBOL     { SourceToken _ (TokSymbolName _ _) }
-  OPERATOR        { SourceToken _ (TokSymbol [] _) }
-  QUAL_OPERATOR   { SourceToken _ (TokSymbol _ _) }
+  OPERATOR        { SourceToken _ (TokOperator [] _) }
+  QUAL_OPERATOR   { SourceToken _ (TokOperator _ _) }
   LIT_HOLE        { SourceToken _ (TokHole _) }
   LIT_CHAR        { SourceToken _ (TokChar _ _) }
   LIT_STRING      { SourceToken _ (TokString _ _) }
@@ -156,16 +156,16 @@ var :: { Ident }
   | 'hiding' { toIdent $1 }
 
 op :: { Ident }
-  : OPERATOR { toSymbol $1 }
-  | '<=' { toSymbol $1 }
-  | '-' { toSymbol $1 }
-  | '@' { toSymbol $1 }
-  | '#' { toSymbol $1 }
-  | ':' { toSymbol $1 }
+  : OPERATOR { toOperator $1 }
+  | '<=' { toOperator $1 }
+  | '-' { toOperator $1 }
+  | '@' { toOperator $1 }
+  | '#' { toOperator $1 }
+  | ':' { toOperator $1 }
 
 opIdent :: { Ident }
   : op { $1 }
-  | QUAL_OPERATOR { toSymbol $1 }
+  | QUAL_OPERATOR { toOperator $1 }
 
 symbol :: { Ident }
   : SYMBOL { toIdent $1 }

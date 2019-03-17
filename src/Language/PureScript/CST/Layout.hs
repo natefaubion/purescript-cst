@@ -273,7 +273,7 @@ insertLayout src@(SourceToken tokAnn tok) nextPos stack =
     TokLowerName [] _ ->
       state & insertDefault & popStack (== LytProperty)
 
-    TokSymbol _ _ ->
+    TokOperator _ _ ->
       state & collapse offsideEndP & insertSep & insertToken src
 
     _ ->

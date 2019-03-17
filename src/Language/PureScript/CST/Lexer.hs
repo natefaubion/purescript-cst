@@ -251,61 +251,61 @@ token = peek >>= maybe (pure TokEof) k0
     ']'  -> next $> TokRightSquare
     '`'  -> next $> TokTick
     ','  -> next $> TokComma
-    '∷'  -> next *> orSymbol1 (TokDoubleColon Unicode) ch1
-    '←'  -> next *> orSymbol1 (TokLeftArrow Unicode) ch1
-    '→'  -> next *> orSymbol1 (TokRightArrow Unicode) ch1
-    '⇒'  -> next *> orSymbol1 (TokRightFatArrow Unicode) ch1
-    '∀'  -> next *> orSymbol1 (TokForall Unicode) ch1
-    '|'  -> next *> orSymbol1 TokPipe ch1
-    '.'  -> next *> orSymbol1 TokDot ch1
-    '\\' -> next *> orSymbol1 TokBackslash ch1
-    '<'  -> next *> orSymbol2 (TokLeftArrow ASCII) ch1 '-'
-    '-'  -> next *> orSymbol2 (TokRightArrow ASCII) ch1 '>'
-    '='  -> next *> orSymbol2' TokEquals (TokRightFatArrow ASCII) ch1 '>'
-    ':'  -> next *> orSymbol2' (TokSymbol [] ":") (TokDoubleColon ASCII) ch1 ':'
+    '∷'  -> next *> orOperator1 (TokDoubleColon Unicode) ch1
+    '←'  -> next *> orOperator1 (TokLeftArrow Unicode) ch1
+    '→'  -> next *> orOperator1 (TokRightArrow Unicode) ch1
+    '⇒'  -> next *> orOperator1 (TokRightFatArrow Unicode) ch1
+    '∀'  -> next *> orOperator1 (TokForall Unicode) ch1
+    '|'  -> next *> orOperator1 TokPipe ch1
+    '.'  -> next *> orOperator1 TokDot ch1
+    '\\' -> next *> orOperator1 TokBackslash ch1
+    '<'  -> next *> orOperator2 (TokLeftArrow ASCII) ch1 '-'
+    '-'  -> next *> orOperator2 (TokRightArrow ASCII) ch1 '>'
+    '='  -> next *> orOperator2' TokEquals (TokRightFatArrow ASCII) ch1 '>'
+    ':'  -> next *> orOperator2' (TokOperator [] ":") (TokDoubleColon ASCII) ch1 ':'
     '?'  -> next *> hole
     '\'' -> next *> char
     '"'  -> next *> string
-    _  | Char.isDigit ch1 -> restore (\err -> err == ErrNumberOutOfRange) (next *> number ch1)
+    _  | Char.isDigit ch1 -> restore (== ErrNumberOutOfRange) (next *> number ch1)
        | Char.isUpper ch1 -> next *> upper [] ch1
        | isIdentStart ch1 -> next *> lower [] ch1
-       | isSymbolChar ch1 -> next *> symbol [] [ch1]
+       | isSymbolChar ch1 -> next *> operator [] [ch1]
        | otherwise        -> throw $ ErrLexeme (Just [ch1]) []
 
-  {-# INLINE orSymbol1 #-}
-  orSymbol1 :: Token -> Char -> Lexer Token
-  orSymbol1 tok ch1 = join $ Parser $ \inp _ ksucc ->
+  {-# INLINE orOperator1 #-}
+  orOperator1 :: Token -> Char -> Lexer Token
+  orOperator1 tok ch1 = join $ Parser $ \inp _ ksucc ->
     case Text.uncons inp of
       Just (ch2, inp2) | isSymbolChar ch2 ->
-        ksucc inp2 $ symbol [] [ch1, ch2]
+        ksucc inp2 $ operator [] [ch1, ch2]
       _ ->
         ksucc inp $ pure tok
 
-  {-# INLINE orSymbol2 #-}
-  orSymbol2 :: Token -> Char -> Char -> Lexer Token
-  orSymbol2 tok ch1 ch2 = join $ Parser $ \inp _ ksucc ->
+  {-# INLINE orOperator2 #-}
+  orOperator2 :: Token -> Char -> Char -> Lexer Token
+  orOperator2 tok ch1 ch2 = join $ Parser $ \inp _ ksucc ->
     case Text.uncons inp of
       Just (ch2', inp2) | ch2 == ch2' ->
         case Text.uncons inp2 of
           Just (ch3, inp3) | isSymbolChar ch3 ->
-            ksucc inp3 $ symbol [] [ch1, ch2, ch3]
+            ksucc inp3 $ operator [] [ch1, ch2, ch3]
           _ ->
             ksucc inp2 $ pure tok
       _ ->
-        ksucc inp $ symbol [] [ch1]
+        ksucc inp $ operator [] [ch1]
 
-  {-# INLINE orSymbol2' #-}
-  orSymbol2' :: Token -> Token -> Char -> Char -> Lexer Token
-  orSymbol2' tok1 tok2 ch1 ch2 = join $ Parser $ \inp _ ksucc ->
+  {-# INLINE orOperator2' #-}
+  orOperator2' :: Token -> Token -> Char -> Char -> Lexer Token
+  orOperator2' tok1 tok2 ch1 ch2 = join $ Parser $ \inp _ ksucc ->
     case Text.uncons inp of
       Just (ch2', inp2) | ch2 == ch2' ->
         case Text.uncons inp2 of
           Just (ch3, inp3) | isSymbolChar ch3 ->
-            ksucc inp3 $ symbol [] [ch1, ch2, ch3]
+            ksucc inp3 $ operator [] [ch1, ch2, ch3]
           _ ->
             ksucc inp2 $ pure tok2
       Just (ch2', inp2) | isSymbolChar ch2' ->
-        ksucc inp2 $ symbol [] [ch1, ch2']
+        ksucc inp2 $ operator [] [ch1, ch2']
       _ ->
         ksucc inp $ pure tok1
 
@@ -324,8 +324,8 @@ token = peek >>= maybe (pure TokEof) k0
                     | otherwise -> ksucc inp3 $ TokSymbolName [] chs
               _ -> ksucc inp TokLeftParen
 
-  symbolParen :: [Text] -> Lexer Token
-  symbolParen qual = restore isReservedSymbolError $ peek >>= \case
+  symbol :: [Text] -> Lexer Token
+  symbol qual = restore isReservedSymbolError $ peek >>= \case
     Just ch | isSymbolChar ch ->
       nextWhile isSymbolChar >>= \chs ->
         peek >>= \case
@@ -337,10 +337,10 @@ token = peek >>= maybe (pure TokEof) k0
     Just ch -> throw $ ErrLexeme (Just [ch]) []
     Nothing -> throw ErrEof
 
-  symbol :: [Text] -> [Char] -> Lexer Token
-  symbol qual pre = do
+  operator :: [Text] -> [Char] -> Lexer Token
+  operator qual pre = do
     rest <- nextWhile isSymbolChar
-    pure . TokSymbol (reverse qual) $ Text.pack pre <> rest
+    pure . TokOperator (reverse qual) $ Text.pack pre <> rest
 
   upper :: [Text] -> Char -> Lexer Token
   upper qual pre = do
@@ -351,11 +351,11 @@ token = peek >>= maybe (pure TokEof) k0
       Just '.' -> do
         let qual' = name : qual
         next *> peek >>= \case
-          Just '(' -> next *> symbolParen qual'
+          Just '(' -> next *> symbol qual'
           Just ch2
             | Char.isUpper ch2 -> next *> upper qual' ch2
             | isIdentStart ch2 -> next *> lower qual' ch2
-            | isSymbolChar ch2 -> next *> symbol qual' [ch2]
+            | isSymbolChar ch2 -> next *> operator qual' [ch2]
             | otherwise -> throw $ ErrLexeme (Just [ch2]) []
           Nothing ->
             throw ErrEof
@@ -379,7 +379,7 @@ token = peek >>= maybe (pure TokEof) k0
   hole = do
     name <- nextWhile isIdentChar
     if Text.null name
-      then symbol [] ['?']
+      then operator [] ['?']
       else pure $ TokHole name
 
   char :: Lexer Token

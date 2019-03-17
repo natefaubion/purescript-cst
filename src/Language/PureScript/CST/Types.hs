@@ -55,7 +55,7 @@ data Token
   | TokBackslash
   | TokLowerName ![Text] !Text
   | TokUpperName ![Text] !Text
-  | TokSymbol ![Text] !Text
+  | TokOperator ![Text] !Text
   | TokSymbolName ![Text] !Text
   | TokSymbolArr !SourceStyle
   | TokHole !Text

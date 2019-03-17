@@ -56,7 +56,7 @@ toIdent tok = case tokValue tok of
   TokLowerName q a  -> Ident tok q a
   TokUpperName q a  -> Ident tok q a
   TokSymbolName q a -> Ident tok q a
-  TokSymbol q a     -> Ident tok q a
+  TokOperator q a   -> Ident tok q a
   TokHole a         -> Ident tok [] a
   _                 -> internalError $ "Invalid identifier token: " <> show tok
 
@@ -67,9 +67,9 @@ toVar tok = case tokValue tok of
     | otherwise -> parseFail tok ErrKeywordVar
   _ -> internalError $ "Invalid variable token: " <> show tok
 
-toSymbol :: SourceToken -> Ident
-toSymbol tok = case tokValue tok of
-  TokSymbol q a -> Ident tok q a
+toOperator :: SourceToken -> Ident
+toOperator tok = case tokValue tok of
+  TokOperator q a -> Ident tok q a
   _ -> internalError $ "Invalid operator token: " <> show tok
 
 toLabel :: SourceToken -> Ident
