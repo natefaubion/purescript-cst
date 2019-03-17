@@ -309,6 +309,13 @@ token = peek >>= maybe (pure TokEof) k0
       _ ->
         ksucc inp $ pure tok1
 
+  {-
+    leftParen
+      : '(' '→'  ')'
+      | '(' '->' ')'
+      | '('  symbolChar+  ')'
+      | '('
+  -}
   leftParen :: Lexer Token
   leftParen = Parser $ \inp kerr ksucc ->
     case Text.span isSymbolChar inp of
@@ -324,6 +331,10 @@ token = peek >>= maybe (pure TokEof) k0
                     | otherwise -> ksucc inp3 $ TokSymbolName [] chs
               _ -> ksucc inp TokLeftParen
 
+  {-
+    symbol
+      : '(' symbolChar+ ')'
+  -}
   symbol :: [Text] -> Lexer Token
   symbol qual = restore isReservedSymbolError $ peek >>= \case
     Just ch | isSymbolChar ch ->
@@ -337,11 +348,28 @@ token = peek >>= maybe (pure TokEof) k0
     Just ch -> throw $ ErrLexeme (Just [ch]) []
     Nothing -> throw ErrEof
 
+  {-
+    operator
+      : symbolChar+
+  -}
   operator :: [Text] -> [Char] -> Lexer Token
   operator qual pre = do
     rest <- nextWhile isSymbolChar
     pure . TokOperator (reverse qual) $ Text.pack pre <> rest
 
+  {-
+    moduleName
+      : upperChar alphaNumChar*
+
+    qualifier
+      : (moduleName '.')* moduleName
+
+    upper
+      : (qualifier '.')? upperChar identChar*
+      | qualifier '.' lowerQualified
+      | qualifier '.' operator
+      | qualifier '.' symbol
+  -}
   upper :: [Text] -> Char -> Lexer Token
   upper qual pre = do
     rest <- nextWhile isIdentChar
@@ -362,6 +390,15 @@ token = peek >>= maybe (pure TokEof) k0
       _ ->
         pure $ TokUpperName (reverse qual) name
 
+  {-
+    lower
+      : '_'
+      | 'forall'
+      | lowerChar identChar*
+
+    lowerQualified
+      : lowerChar identChar*
+  -}
   lower :: [Text] -> Char -> Lexer Token
   lower qual pre = do
     rest <- nextWhile isIdentChar
@@ -375,6 +412,10 @@ token = peek >>= maybe (pure TokEof) k0
           "forall" | null qual -> pure $ TokForall ASCII
           name -> pure $ TokLowerName (reverse qual) name
 
+  {-
+    hole
+      : '?' identChar+
+  -}
   hole :: Lexer Token
   hole = do
     name <- nextWhile isIdentChar
@@ -382,6 +423,11 @@ token = peek >>= maybe (pure TokEof) k0
       then operator [] ['?']
       else pure $ TokHole name
 
+  {-
+    char
+      : "'" '\' escape "'"
+      | "'" [^'] "'"
+  -}
   char :: Lexer Token
   char = do
     (raw, ch) <- peek >>= \case
@@ -401,6 +447,20 @@ token = peek >>= maybe (pure TokEof) k0
       _ ->
         throw $ ErrEof
 
+  {-
+    stringPart
+      : '\' escape
+      | '\' [ \r\n]+ '\'
+      | [^"]
+
+    string
+      : '"' stringPart* '"'
+      | '"""' .* '"""'
+
+    This assumes maximal munch for quotes. A raw string literal can end with
+    any number of quotes, where the last 3 are considered the closing
+    delimiter.
+  -}
   string :: Lexer Token
   string = do
     quotes1 <- nextWhile (== '"')
@@ -448,6 +508,15 @@ token = peek >>= maybe (pure TokEof) k0
               _          -> go (acc <> chs <> quotes2)
         go ""
 
+  {-
+    escape
+      : 't'
+      | 'r'
+      | 'n'
+      | "'"
+      | '"'
+      | 'x' [0-9a-fA-F]{0,6}
+  -}
   escape :: Lexer (Text, Char)
   escape = do
     ch <- peek
@@ -471,6 +540,11 @@ token = peek >>= maybe (pure TokEof) k0
         go 0 [] $ Text.unpack $ Text.take 6 inp
       _ -> throw ErrCharEscape
 
+  {-
+    number
+      : hexadecimal
+      | integer ('.'  fraction)? exponent?
+  -}
   number :: Char -> Lexer Token
   number ch1 = peek >>= \ch2 -> case (ch1, ch2) of
     ('0', Just 'x') -> next *> hexadecimal
@@ -507,6 +581,11 @@ token = peek >>= maybe (pure TokEof) k0
     Left _ -> throw ErrNumberOutOfRange
     Right n -> pure $ TokNumber raw n
 
+  {-
+    integer
+      : '0'
+      | [1-9] digits
+  -}
   integer :: Lexer (Maybe (Text, String))
   integer = peek >>= \case
     Just '0' -> next *> peek >>= \case
@@ -515,6 +594,14 @@ token = peek >>= maybe (pure TokEof) k0
     Just ch | isDigitChar ch -> Just <$> digits
     _ -> pure $ Nothing
 
+  {-
+    integer1
+      : '0'
+      | [1-9] digits
+
+    This is the same as 'integer', the only difference is that this expects the
+    first char to be consumed during dispatch.
+  -}
   integer1 :: Char -> Lexer (Maybe (Text, String))
   integer1 = \case
     '0' -> peek >>= \case
@@ -525,6 +612,10 @@ token = peek >>= maybe (pure TokEof) k0
       pure $ Just (Text.cons ch raw, ch : chs)
     _ -> pure $ Nothing
 
+  {-
+    fraction
+      : '.' digits
+  -}
   fraction :: Lexer (Maybe (Text, String))
   fraction = peek >>= \case
     Just '.' -> do
@@ -532,11 +623,21 @@ token = peek >>= maybe (pure TokEof) k0
       pure $ Just ("." <> raw, chs)
     _ -> pure $ Nothing
 
+  {-
+    digits
+      : [0-9_]*
+
+    Digits can contain underscores, which are ignored.
+  -}
   digits :: Lexer (Text, String)
   digits = do
-    raw <- nextWhile isDigitChar
+    raw <- nextWhile isNumberChar
     pure (raw, filter (/= '_') $ Text.unpack raw)
 
+  {-
+    exponent
+      : 'e' ('+' | '-')? integer
+  -}
   exponent :: Lexer (Maybe (Text, Int))
   exponent = peek >>= \case
     Just 'e' -> do
@@ -554,6 +655,10 @@ token = peek >>= maybe (pure TokEof) k0
     _ ->
       pure Nothing
 
+  {-
+    hexadecimal
+      : '0x' [0-9a-fA-F]+
+  -}
   hexadecimal :: Lexer Token
   hexadecimal = do
     chs <- nextWhile Char.isHexDigit
@@ -608,7 +713,7 @@ isDigitChar :: Char -> Bool
 isDigitChar c = c >= '0' && c <= '9'
 
 isNumberChar :: Char -> Bool
-isNumberChar c = c >= '0' && c <= '9' || c == '_'
+isNumberChar c = (c >= '0' && c <= '9') || c == '_'
 
 isNormalStringChar :: Char -> Bool
 isNormalStringChar c = c /= '"' && c /= '\\' && c /= '\r' && c /= '\n'
