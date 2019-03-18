@@ -21,6 +21,8 @@ import Language.PureScript.CST.Layout
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Types
 
+import Debug.Trace
+
 initialParserState :: Text -> ParserState
 initialParserState src = do
   let (parserLeading, src') = comments src
@@ -47,39 +49,30 @@ recover err k tok = do
   let revert = pushBack tok *> pure [tok]
   stk  <- getLayoutStack
   toks <-
-    case tokValue tok of
+    case traceShow (err, stk, tokValue tok) $ tokValue tok of
       TokRightParen           -> revert
       TokRightBrace           -> revert
       TokRightSquare          -> revert
+      TokLayoutSep            -> revert
+      TokLayoutEnd            -> revert
+      TokComma                -> revert
+      TokPipe                 -> pure [tok]
       TokLowerName [] "in"    -> pure [tok]
       TokLowerName [] "where" -> pure [tok]
       _ | null stk -> revert
         | otherwise -> do
-            let
-              p = const True
-              -- p = case snd $ head stk of
-              --   LytRoot      -> \(_, t) -> t == TokEof
-              --   LytParen     -> \(_, t) -> t == TokRightParen
-              --   LytBrace     -> \(_, t) -> t == TokRightBrace
-              --   LytSquare    -> \(_, t) -> t == TokRightSquare
-              --   LytCase      -> \(_, t) -> t == TokLowerName [] "of"
-              --   LytTick      -> \(_, t) -> t == TokTick
-              --   LytLambda    -> \(_, t) -> t == TokRightArrow ASCII || t == TokRightArrow Unicode
-              --   LytCaseGuard -> \(_, t) -> t == TokPipe || t == TokRightArrow ASCII || t == TokRightArrow Unicode || t == TokLayoutSep || t == TokLayoutEnd
-              --   LytDeclGuard -> \(_, t) -> t == TokPipe || t == TokEquals || t == TokLayoutSep || t == TokLayoutEnd
-              --   LytDecl      -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
-              --   LytDeclWhere -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd || t == TokLowerName [] "where"
-              --   LytIndent _  -> \(_, t) -> t == TokLayoutSep || t == TokLayoutEnd
-            (tok :) <$> munchWhile (not . p)
+            let p _ stk' = stk == stk'
+            (tok :) <$> munchWhile p
   addFailure toks err
   pure $ k toks
 
-munchWhile :: (SourceToken -> Bool) -> Parser [SourceToken]
+munchWhile :: (SourceToken -> LayoutStack -> Bool) -> Parser [SourceToken]
 munchWhile p = go mempty
   where
   go acc = do
     tok <- munch
-    if p tok
+    stk <- getLayoutStack
+    if p tok stk
       then go (acc `DList.snoc` tok)
       else do
         pushBack tok

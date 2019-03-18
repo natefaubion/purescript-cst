@@ -2,6 +2,8 @@ module Language.PureScript.CST.Monad where
 
 import Prelude
 
+import Data.List (sortBy)
+import Data.Ord (comparing)
 import Data.Text (Text)
 import Language.PureScript.CST.Errors
 import Language.PureScript.CST.Layout
@@ -52,11 +54,11 @@ runParser :: ParserState -> Parser a -> Either [ParserError] a
 runParser st (Parser k) = k st left right
   where
   left (ParserState {..}) err =
-    Left $ reverse $ err : parserErrors
+    Left $ sortBy (comparing errRange) $ err : parserErrors
 
   right (ParserState {..}) res
     | null parserErrors = Right res
-    | otherwise = Left $ reverse parserErrors
+    | otherwise = Left $ sortBy (comparing errRange) parserErrors
 
 parseError :: SourceToken -> Parser a
 parseError tok = Parser $ \st kerr _ ->
