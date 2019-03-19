@@ -1,9 +1,11 @@
+{-# LANGUAGE MonoLocalBinds #-}
 module Language.PureScript.CST.Utils where
 
 import Prelude
 
 import Control.Monad (when)
 import Data.Foldable (for_)
+import Data.Functor (($>))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -38,6 +40,21 @@ unexpectedLetBinding toks = LetBindingName mempty (ValueBindingFields (unexpecte
 unexpectedInstBinding :: Monoid a => [SourceToken] -> InstanceBinding a
 unexpectedInstBinding toks = InstanceBindingName mempty (ValueBindingFields (unexpected (head toks)) [] (Guarded []))
 
+unexpectedRecordUpdate :: Monoid a => [SourceToken] -> RecordUpdate a
+unexpectedRecordUpdate toks = RecordUpdateLeaf (unexpected (head toks)) (head toks) (unexpectedExpr toks)
+
+unexpectedRecordLabeled :: [SourceToken] -> RecordLabeled a
+unexpectedRecordLabeled toks = RecordPun (unexpected (head toks))
+
+rangeToks :: TokenRange -> [SourceToken]
+rangeToks (a, b) = [a, b]
+
+unexpectedToks :: (a -> TokenRange) -> ([SourceToken] -> b) -> ParserErrorType -> (a -> Parser b)
+unexpectedToks toRange toCst err old = do
+  let toks = rangeToks $ toRange old
+  addFailure toks err
+  pure $ toCst toks
+
 separated :: [(SourceToken, a)] -> Separated a
 separated = go []
   where
@@ -64,7 +81,7 @@ toVar :: SourceToken -> Parser Ident
 toVar tok = case tokValue tok of
   TokLowerName q a
     | not (Set.member a reservedNames) -> pure $ Ident tok q a
-    | otherwise -> parseFail tok ErrKeywordVar
+    | otherwise -> addFailure [tok] ErrKeywordVar $> unexpected tok
   _ -> internalError $ "Invalid variable token: " <> show tok
 
 toOperator :: SourceToken -> Ident
@@ -155,7 +172,7 @@ toBinders = convert []
         ExprOp a' lhs' op' (ExprApp a'' rhs'' (ExprIdent a''' ident)) -> do
           rhs' <- toBinders rhs
           convert (BinderNamed (a <> a'' <> a''') ident tok (head rhs') : tail rhs' <> acc) $ ExprOp a' lhs' op' rhs''
-        _ -> parseFail (fst $ exprRange lhs) ErrExprInBinder
+        _ -> unexpectedToks exprRange (pure . unexpectedBinder) ErrExprInBinder lhs
     ExprOp a lhs op rhs -> do
       lhs' <- toBinder lhs
       rhs' <- toBinder rhs
@@ -163,17 +180,13 @@ toBinders = convert []
     ExprApp _ lhs rhs -> do
       rhs' <- toBinders rhs
       convert (rhs' <> acc) lhs
-    expr -> parseFail (fst $ exprRange expr) ErrExprInBinder
+    expr -> unexpectedToks exprRange (pure . unexpectedBinder) ErrExprInBinder expr
 
 toBinderAtoms :: forall a. Monoid a => Expr a -> Parser [Binder a]
 toBinderAtoms expr = do
   bs <- toBinders expr
   for bs $ \b -> do
-    let
-      err = do
-        let toks = [fst $ binderRange b]
-        addFailure toks ErrExprInBinder
-        pure $ unexpectedBinder toks
+    let err = unexpectedToks binderRange unexpectedBinder ErrExprInBinder b
     case b of
       BinderOp {} -> err
       BinderTyped {} -> err
@@ -188,6 +201,7 @@ toBinder expr = do
       pure $ BinderNamed a ident tok $ BinderConstructor a' ctr args
     a : [] -> pure a
     _ : _ -> do
+      -- TODO
       let toks = fst . binderRange <$> bs
       addFailure toks ErrExprInBinder
       pure $ unexpectedBinder toks
@@ -201,6 +215,7 @@ toDeclOrBinder expr = do
     BinderConstructor a ident [] : args -> pure $ Right $ BinderConstructor a ident args
     a : [] -> pure $ Right $ a
     _ : _ -> do
+      -- TODO
       let toks = fst . binderRange <$> bs
       addFailure toks ErrExprInDeclOrBinder
       pure $ Right $ unexpectedBinder toks
@@ -225,7 +240,8 @@ toDecl ksucc kerr expr guarded = do
     [] -> internalError "Empty binder set"
 
 toRecordFields
-  :: Separated (Either (RecordLabeled (Expr a)) (RecordUpdate a))
+  :: Monoid a
+  => Separated (Either (RecordLabeled (Expr a)) (RecordUpdate a))
   -> Parser (Either (Separated (RecordLabeled (Expr a))) (Separated (RecordUpdate a)))
 toRecordFields = \case
   Separated (Left a) as ->
@@ -234,11 +250,16 @@ toRecordFields = \case
     Right . Separated a <$> traverse (traverse unRight) as
   where
   unLeft (Left tok) = pure tok
-  unLeft (Right tok) = parseFail (fst $ recordUpdateRange tok) ErrRecordUpdateInCtr
+  unLeft (Right tok) =
+    unexpectedToks recordUpdateRange unexpectedRecordLabeled ErrRecordUpdateInCtr tok
 
   unRight (Right tok) = pure tok
-  unRight (Left (RecordPun (Ident tok _ _))) = parseFail tok ErrRecordPunInUpdate
-  unRight (Left (RecordField _ tok _)) = parseFail tok ErrRecordCtrInUpdate
+  unRight (Left (RecordPun (Ident tok _ _))) = do
+    addFailure [tok] ErrRecordPunInUpdate
+    pure $ unexpectedRecordUpdate [tok]
+  unRight (Left (RecordField _ tok _)) = do
+    addFailure [tok] ErrRecordCtrInUpdate
+    pure $ unexpectedRecordUpdate [tok]
 
 checkFundeps :: ClassHead a -> Parser ()
 checkFundeps (ClassHead _ _ _ _ Nothing) = pure ()
@@ -271,8 +292,8 @@ toModuleDecls = goImport []
     let getName = instName . instHead
     when (getName h == getName h') $ addFailure [identTok $ getName h'] ErrInstanceNameMismatch
     goDecl (DeclInstanceChain (a <> a') (Separated h (t <> ((tok, h') : t'))) : acc) xs
-  goDecl _ (TmpChain tok _ : _) = parseFail tok ErrElseInDecl
-  goDecl _ (TmpImport imp : _) = parseFail (impKeyword imp) ErrImportInDecl
+  goDecl _ (TmpChain tok _ : _) = addFailure [tok] ErrElseInDecl $> [unexpectedDecl [tok]]
+  goDecl _ (TmpImport imp : _) = unexpectedToks importDeclRange (pure . unexpectedDecl) ErrImportInDecl imp
 
 varToType :: Monoid a => TypeVarBinding a -> Type a
 varToType (TypeVarKinded (Wrapped l (Labeled var tok kind) r)) =
@@ -294,7 +315,7 @@ toLetBinding lhs guarded = do
         Unconditional tok expr ->
           pure $ LetBindingPattern mempty binder tok expr
         Guarded (g : _) ->
-          parseFail (grdBar g) ErrGuardInLetBinder
+          unexpectedToks guardedExprRange unexpectedLetBinding ErrGuardInLetBinder g
         Guarded _ ->
           internalError "Empty guard set"
 

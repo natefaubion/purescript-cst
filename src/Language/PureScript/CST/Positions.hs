@@ -327,3 +327,8 @@ recordUpdateRange :: RecordUpdate a -> TokenRange
 recordUpdateRange = \case
   RecordUpdateLeaf a _ b -> (identTok a, snd $ exprRange b)
   RecordUpdateBranch a (Wrapped _ _ b) -> (identTok a, b)
+
+recordLabeledExprRange :: RecordLabeled (Expr a) -> TokenRange
+recordLabeledExprRange = \case
+  RecordPun a -> identRange a
+  RecordField a _ b -> (fst $ identRange a, snd $ exprRange b)

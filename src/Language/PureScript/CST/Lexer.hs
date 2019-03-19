@@ -21,8 +21,6 @@ import Language.PureScript.CST.Layout
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Types
 
-import Debug.Trace
-
 initialParserState :: Text -> ParserState
 initialParserState src = do
   let (parserLeading, src') = comments src
@@ -49,7 +47,7 @@ recover err k tok = do
   let revert = pushBack tok *> pure [tok]
   stk  <- getLayoutStack
   toks <-
-    case traceShow (err, stk, tokValue tok) $ tokValue tok of
+    case tokValue tok of
       TokRightParen           -> revert
       TokRightBrace           -> revert
       TokRightSquare          -> revert
@@ -59,10 +57,8 @@ recover err k tok = do
       TokPipe                 -> pure [tok]
       TokLowerName [] "in"    -> pure [tok]
       TokLowerName [] "where" -> pure [tok]
-      _ | null stk -> revert
-        | otherwise -> do
-            let p _ stk' = stk == stk'
-            (tok :) <$> munchWhile p
+      _ | null stk            -> revert
+        | otherwise           -> (tok :) <$> munchWhile (const (stk ==))
   addFailure toks err
   pure $ k toks
 

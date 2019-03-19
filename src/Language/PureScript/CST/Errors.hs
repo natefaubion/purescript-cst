@@ -7,6 +7,7 @@ module Language.PureScript.CST.Errors
 import Prelude
 
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Char (isSpace)
 import Language.PureScript.CST.Layout
 import Language.PureScript.CST.Print
@@ -116,16 +117,16 @@ prettyPrintErrorMessage (ParserError {..}) = case errType of
   ErrExpectedExponent ->
     "Expected exponent"
   ErrReservedSymbol sym ->
-    "Unexpected reserved symbol " <> show sym
+    "Unexpected reserved symbol '" <> Text.unpack sym <> "'"
   ErrCharInGap ch ->
-    "Unexpected character " <> show ch <> " in gap"
+    "Unexpected character '" <> [ch] <> "' in gap"
   ErrLexeme _ _ ->
     basicError
   ErrLetBinding ->
     basicError
   ErrToken
     | SourceToken _ (TokLeftArrow _) : _ <- errToks ->
-        "Unexpected \"<-\" in expression, perhaps due to a missing \"do\" or \"ado\" keyword"
+        "Unexpected \"<-\" in expression, perhaps due to a missing 'do' or 'ado' keyword"
   ErrToken ->
     basicError
   ErrExpr
@@ -165,4 +166,4 @@ prettyPrintErrorMessage (ParserError {..}) = case errType of
     TokLayoutSep   -> "Unexpected or mismatched indentation"
     TokLayoutEnd   -> "Unexpected or mismatched indentation"
     TokEof         -> "Unexpected end of input"
-    tok            -> "Unexpected token " <> show (printToken tok)
+    tok            -> "Unexpected token '" <> Text.unpack (printToken tok) <> "'"
