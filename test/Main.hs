@@ -1,5 +1,6 @@
 import Prelude
 
+import Control.Monad (when)
 import qualified Data.ByteString.Lazy as BS
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -45,30 +46,49 @@ layoutTests = do
 litTests :: TestTree
 litTests = testGroup "Literals"
   [ testProperty "Integer" $
-      checkTok checkReadNum (\case TokInt a b -> Just (a, b); _ -> Nothing) . unInt
+      checkTok checkReadNum (\case TokInt _ a -> Just a; _ -> Nothing) . unInt
   , testProperty "Hex" $
-      checkTok checkReadNum (\case TokInt a b -> Just (a, b); _ -> Nothing) . unHex
+      checkTok checkReadNum (\case TokInt _ a -> Just a; _ -> Nothing) . unHex
   , testProperty "Number" $
-      checkTok checkReadNum (\case TokNumber a b -> Just (a, b); _ -> Nothing) . unFloat
+      checkTok checkReadNum (\case TokNumber _ a -> Just a; _ -> Nothing) . unFloat
   , testProperty "Exponent" $
-      checkTok checkReadNum (\case TokNumber a b -> Just (a, b); _ -> Nothing) . unExponent
+      checkTok checkReadNum (\case TokNumber _ a -> Just a; _ -> Nothing) . unExponent
+
+  , testProperty "Integer (round trip)" $ roundTripTok . unInt
+  , testProperty "Hex (round trip)" $ roundTripTok . unHex
+  , testProperty "Number (round trip)" $ roundTripTok . unFloat
+  , testProperty "Exponent (round trip)" $ roundTripTok . unExponent
+  , testProperty "Char (round trip)" $ roundTripTok . unChar
+  , testProperty "String (round trip)" $ roundTripTok . unString
+  , testProperty "Raw String (round trip)" $ roundTripTok . unRawString
   ]
+
+readTok :: Text -> Gen SourceToken
+readTok t = case CST.lex t of
+  Right (tok : _) ->
+    pure tok
+  Right _ ->
+    fail "Empty token stream"
+  Left errs ->
+    fail $ "Failed to parse: " <> unlines (CST.prettyPrintError <$> errs)
 
 checkTok
   :: (Text -> a -> Gen Bool)
-  -> (Token -> Maybe (Text, a))
+  -> (Token -> Maybe a)
   -> Text
   -> Gen Bool
-checkTok p f t = case CST.lex t of
-  Right (SourceToken _ tok : _)
-    | Just (a, b) <- f tok ->
-        if a == t
-          then p t b
-          else fail $ "Mismatched raw text: " <> show a
-  Right toks ->
-    fail $ "Failed to lex correctly: " <> show toks
-  Left errs ->
-    fail $ "Failed to parse: " <> unlines (CST.prettyPrintError <$> errs)
+checkTok p f t = do
+  SourceToken _ tok <- readTok t
+  case f tok of
+    Just a  -> p t a
+    Nothing -> fail $ "Failed to lex correctly: " <> show tok
+
+roundTripTok :: Text -> Gen Bool
+roundTripTok t = do
+  tok <- readTok t
+  let t' = CST.printTokens [tok]
+  tok' <- readTok t'
+  pure $ tok == tok'
 
 checkReadNum :: (Eq a, Read a) => Text -> a -> Gen Bool
 checkReadNum t a = do
@@ -108,6 +128,24 @@ newtype PSSourceHex = PSSourceHex { unHex :: Text }
 instance Arbitrary PSSourceHex where
   arbitrary = resize 16 genHex
 
+newtype PSSourceChar = PSSourceChar { unChar :: Text }
+  deriving (Show, Eq)
+
+instance Arbitrary PSSourceChar where
+  arbitrary = genChar
+
+newtype PSSourceString = PSSourceString { unString :: Text }
+  deriving (Show, Eq)
+
+instance Arbitrary PSSourceString where
+  arbitrary = resize 256 genString
+
+newtype PSSourceRawString = PSSourceRawString { unRawString :: Text }
+  deriving (Show, Eq)
+
+instance Arbitrary PSSourceRawString where
+  arbitrary = resize 256 genRawString
+
 genInt :: Gen PSSourceInt
 genInt = PSSourceInt . Text.pack <$> do
   (:) <$> nonZeroChar
@@ -121,11 +159,61 @@ genFloat = PSSourceFloat <$> do
 
 genHex :: Gen PSSourceHex
 genHex = PSSourceHex <$> do
-  nums <- listOf1 $ elements $ ['a'..'f'] <> ['A'..'F'] <> ['0'..'9']
+  nums <- listOf1 hexDigit
   pure $ "0x" <> Text.pack nums
+
+genChar :: Gen PSSourceChar
+genChar = PSSourceChar <$> do
+  ch  <- (toEnum :: Int -> Char) <$> resize 0xFFFF arbitrarySizedNatural
+  ch' <- case ch of
+    '\'' -> discard
+    '\\' -> genCharEscape
+    c    ->  pure $ Text.singleton c
+  pure $ "'" <> ch' <> "'"
+
+genString :: Gen PSSourceString
+genString = PSSourceString <$> do
+  chs <- listOf $ arbitraryUnicodeChar >>= \case
+    '"'  -> discard
+    '\n' -> discard
+    '\r' -> discard
+    '\\' -> genCharEscape
+    c    -> pure $ Text.singleton c
+  pure $ "\"" <> Text.concat chs <> "\""
+
+genRawString :: Gen PSSourceRawString
+genRawString = PSSourceRawString <$> do
+  chs <- listOf $ arbitraryUnicodeChar
+  let
+    k1 acc qs cs = do
+      let (cs', q) = span (/= '"') cs
+      k2 (acc <> cs') qs q
+    k2 acc qs [] = acc <> qs
+    k2 acc qs cs = do
+      let (q, cs') = span (== '"') cs
+      k1 (acc <> take 2 q) (qs <> drop 2 q) cs'
+    chs' = k1 [] [] chs
+  when (all (== '"') chs') discard
+  pure $ "\"\"\"" <> Text.pack chs' <> "\"\"\""
+
+genCharEscape :: Gen Text
+genCharEscape = oneof
+  [ pure "\\t"
+  , pure "\\r"
+  , pure "\\n"
+  , pure "\\\""
+  , pure "\\'"
+  , pure "\\\\"
+  , do
+      chs <- resize 4 $ listOf1 hexDigit
+      pure $ "\\x" <> Text.pack chs
+  ]
 
 numChar :: Gen Char
 numChar = elements "0123456789_"
 
 nonZeroChar :: Gen Char
 nonZeroChar = elements "123456789"
+
+hexDigit :: Gen Char
+hexDigit = elements $ ['a'..'f'] <> ['A'..'F'] <> ['0'..'9']
