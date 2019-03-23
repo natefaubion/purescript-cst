@@ -603,13 +603,15 @@ token = peek >>= maybe (pure TokEof) k0
 
   {-
     fraction
-      : '.' digits
+      : '.' [0-9] digits
   -}
   fraction :: Lexer (Maybe (Text, String))
   fraction = peek >>= \case
     Just '.' -> do
       (raw, chs) <- next *> digits
-      pure $ Just ("." <> raw, chs)
+      if Text.null raw
+        then throw ErrExpectedFraction
+        else pure $ Just ("." <> raw, chs)
     _ -> pure $ Nothing
 
   {-
@@ -651,7 +653,9 @@ token = peek >>= maybe (pure TokEof) k0
   hexadecimal :: Lexer Token
   hexadecimal = do
     chs <- nextWhile Char.isHexDigit
-    pure $ TokInt ("0x" <> chs) $ digitsToIntegerBase 16 $ Text.unpack chs
+    if Text.null chs
+      then throw ErrExpectedHex
+      else pure $ TokInt ("0x" <> chs) $ digitsToIntegerBase 16 $ Text.unpack chs
 
 digitsToInteger :: [Char] -> Integer
 digitsToInteger = digitsToIntegerBase 10

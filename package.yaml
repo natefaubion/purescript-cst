@@ -111,3 +111,4 @@ tests:
     - filepath
     - tasty
     - tasty-golden
+    - tasty-quickcheck

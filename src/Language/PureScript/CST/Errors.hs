@@ -40,7 +40,9 @@ data ParserErrorType
   | ErrCharEscape
   | ErrNumberOutOfRange
   | ErrLeadingZero
+  | ErrExpectedFraction
   | ErrExpectedExponent
+  | ErrExpectedHex
   | ErrReservedSymbol Text
   | ErrCharInGap Char
   | ErrLexeme (Maybe String) [String]
@@ -114,8 +116,12 @@ prettyPrintErrorMessage (ParserError {..}) = case errType of
     "Number literal is out of range"
   ErrLeadingZero ->
     "Unexpected leading zeros"
+  ErrExpectedFraction ->
+    "Expected fraction"
   ErrExpectedExponent ->
     "Expected exponent"
+  ErrExpectedHex ->
+    "Expected hex digit"
   ErrReservedSymbol sym ->
     "Unexpected reserved symbol '" <> Text.unpack sym <> "'"
   ErrCharInGap ch ->

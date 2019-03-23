@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 4628a2ef8808b8d6029e3a9c0b0a82502e9e834abfc57edc206691a00bac1d64
+-- hash: d6f6035c821d78d553c296080f90d143fbbb2d54bfebffadc23722658ae6f720
 
 name:           purescript-cst
 version:        0.1.0.0
@@ -117,5 +117,6 @@ test-suite purescript-cst-test
     , scientific
     , tasty
     , tasty-golden
+    , tasty-quickcheck
     , text
   default-language: Haskell2010
