@@ -110,7 +110,7 @@ pushBack :: SourceToken -> Parser ()
 pushBack tok = Parser $ \st _ ksucc ->
   ksucc (st { parserBuff = Right tok : parserBuff st }) ()
 
-{-$ INLINE tryPrefix #-}
+{-# INLINE tryPrefix #-}
 tryPrefix :: Parser a -> Parser b -> Parser (Maybe a, b)
 tryPrefix (Parser lhs) rhs = Parser $ \st kerr ksucc ->
   lhs st
