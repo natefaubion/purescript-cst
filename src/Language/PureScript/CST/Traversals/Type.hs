@@ -23,7 +23,9 @@ everythingOnTypes op k = goTy
     TypeOpName _ _ -> k ty
     TypeArr _ ty2 _ ty3 -> k ty `op` (goTy ty2 `op` goTy ty3)
     TypeArrName _ _ -> k ty
-    TypeConstrained _ ty2 _ ty3 -> k ty `op` (goTy ty2 `op` goTy ty3)
+    TypeConstrained _ (constraintTys -> ty2) _ ty3
+      | null ty2 -> k ty `op` goTy ty3
+      | otherwise -> k ty `op` (foldr1 op (k <$> ty2) `op` goTy ty3)
     TypeParens _ (Wrapped _ ty2 _) -> k ty `op` goTy ty2
 
   goRow ty = \case
@@ -31,3 +33,7 @@ everythingOnTypes op k = goTy
     Row Nothing (Just (_, ty2)) -> k ty `op` goTy ty2
     Row (Just lbls) Nothing -> k ty `op` everythingOnSeparated op (goTy . lblValue) lbls
     Row (Just lbls) (Just (_, ty2)) -> k ty `op` (everythingOnSeparated op (goTy . lblValue) lbls `op` goTy ty2)
+
+  constraintTys = \case
+    Constraint _ _ tys -> tys
+    ConstraintParens _ (Wrapped _ c _) -> constraintTys c

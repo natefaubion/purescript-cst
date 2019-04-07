@@ -10,3 +10,4 @@ test = case foo of{
 
 test = case f of {Foo -> do {that}
                         where {foo = 12}}}
+<eof>

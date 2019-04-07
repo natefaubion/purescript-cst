@@ -8,3 +8,4 @@ class Foo a b c d | a -> b, c -> d where{
 class Foo a b c d | a -> b, c -> d;
 
 instance foo :: Foo}
+<eof>

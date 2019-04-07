@@ -50,3 +50,5 @@ test a
   | case a, b of{
          _, 42 -> b;
          _, 12 -> false}, b = true}
+
+<eof>

@@ -6,3 +6,4 @@ test = ado{
    in bar;
 
 test = ado {}in foo}
+<eof>

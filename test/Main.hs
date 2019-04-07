@@ -37,9 +37,9 @@ layoutTests = do
   where
   runLexer file = do
     src <- Text.readFile file
-    case CST.lex src of
-      Left errs ->
-        pure $ Text.pack $ unlines $ CST.prettyPrintError <$> errs
+    case sequence $ CST.lex src of
+      Left (_, err) ->
+        pure $ Text.pack $ CST.prettyPrintError err
       Right toks -> do
         pure $ CST.printTokens toks
 
@@ -65,12 +65,12 @@ litTests = testGroup "Literals"
 
 readTok :: Text -> Gen SourceToken
 readTok t = case CST.lex t of
-  Right (tok : _) ->
+  Right tok : _ ->
     pure tok
-  Right _ ->
+  Left (_, err) : _ ->
+    fail $ "Failed to parse: " <> CST.prettyPrintError err
+  [] ->
     fail "Empty token stream"
-  Left errs ->
-    fail $ "Failed to parse: " <> unlines (CST.prettyPrintError <$> errs)
 
 checkTok
   :: (Text -> a -> Gen Bool)

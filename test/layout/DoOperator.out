@@ -5,3 +5,5 @@ test = do{
   foo do{
     bar}}
   <|> bar}
+
+<eof>

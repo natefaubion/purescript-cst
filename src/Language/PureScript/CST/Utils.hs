@@ -4,17 +4,20 @@ module Language.PureScript.CST.Utils where
 import Prelude
 
 import Control.Monad (when)
+import Data.Coerce (coerce)
 import Data.Foldable (for_)
 import Data.Functor (($>))
+import qualified Data.List.NonEmpty as NE
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
-import Data.Traversable (for)
+import qualified Data.Text as Text
 import Language.PureScript.CST.Errors
 import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Traversals.Type
 import Language.PureScript.CST.Types
+import qualified Language.PureScript.Names as N
 
 placeholder :: SourceToken
 placeholder = SourceToken
@@ -22,29 +25,35 @@ placeholder = SourceToken
   , tokValue = TokLowerName [] "<placeholder>"
   }
 
-unexpected :: SourceToken -> Ident
-unexpected tok = Ident tok [] "<unexpected>"
+unexpectedName :: SourceToken -> Name Ident
+unexpectedName tok = Name tok (Ident "<unexpected>")
+
+unexpectedQual :: SourceToken -> QualifiedName Ident
+unexpectedQual tok = QualifiedName tok Nothing (Ident "<unexpected>")
+
+unexpectedLabel :: SourceToken -> Label
+unexpectedLabel tok = Label tok "<unexpected>"
 
 unexpectedExpr :: Monoid a => [SourceToken] -> Expr a
-unexpectedExpr toks = ExprIdent mempty (unexpected (head toks))
+unexpectedExpr toks = ExprIdent mempty (unexpectedQual (head toks))
 
 unexpectedDecl :: Monoid a => [SourceToken] -> Declaration a
-unexpectedDecl toks = DeclValue mempty (ValueBindingFields (unexpected (head toks)) [] (Guarded []))
+unexpectedDecl toks = DeclValue mempty (ValueBindingFields (unexpectedName (head toks)) [] (error "<unexpected"))
 
 unexpectedBinder :: Monoid a => [SourceToken] -> Binder a
-unexpectedBinder toks = BinderVar mempty (unexpected (head toks))
+unexpectedBinder toks = BinderVar mempty (unexpectedName (head toks))
 
 unexpectedLetBinding :: Monoid a => [SourceToken] -> LetBinding a
-unexpectedLetBinding toks = LetBindingName mempty (ValueBindingFields (unexpected (head toks)) [] (Guarded []))
+unexpectedLetBinding toks = LetBindingName mempty (ValueBindingFields (unexpectedName (head toks)) [] (error "<unexpected>"))
 
 unexpectedInstBinding :: Monoid a => [SourceToken] -> InstanceBinding a
-unexpectedInstBinding toks = InstanceBindingName mempty (ValueBindingFields (unexpected (head toks)) [] (Guarded []))
+unexpectedInstBinding toks = InstanceBindingName mempty (ValueBindingFields (unexpectedName (head toks)) [] (error "<unexpected>"))
 
 unexpectedRecordUpdate :: Monoid a => [SourceToken] -> RecordUpdate a
-unexpectedRecordUpdate toks = RecordUpdateLeaf (unexpected (head toks)) (head toks) (unexpectedExpr toks)
+unexpectedRecordUpdate toks = RecordUpdateLeaf (unexpectedLabel (head toks)) (head toks) (unexpectedExpr toks)
 
 unexpectedRecordLabeled :: [SourceToken] -> RecordLabeled a
-unexpectedRecordLabeled toks = RecordPun (unexpected (head toks))
+unexpectedRecordLabeled toks = RecordPun (unexpectedName (head toks))
 
 rangeToks :: TokenRange -> [SourceToken]
 rangeToks (a, b) = [a, b]
@@ -66,39 +75,52 @@ consSeparated :: a -> SourceToken -> Separated a -> Separated a
 consSeparated x sep (Separated {..}) = Separated x ((sep, sepHead) : sepTail)
 
 internalError :: String -> a
-internalError = error
+internalError = error . ("Internal parser error: " <>)
 
-toIdent :: SourceToken -> Ident
-toIdent tok = case tokValue tok of
-  TokLowerName q a  -> Ident tok q a
-  TokUpperName q a  -> Ident tok q a
-  TokSymbolName q a -> Ident tok q a
-  TokOperator q a   -> Ident tok q a
-  TokHole a         -> Ident tok [] a
-  _                 -> internalError $ "Invalid identifier token: " <> show tok
+toModuleName :: SourceToken -> [Text] -> Parser (Maybe N.ModuleName)
+toModuleName _ [] = pure Nothing
+toModuleName tok ns = do
+  when (not (all isValidModuleNamespace ns)) $ addFailure [tok] ErrModuleName
+  pure . Just . N.ModuleName $ N.ProperName <$> ns
 
-toVar :: SourceToken -> Parser Ident
-toVar tok = case tokValue tok of
+upperToModuleName :: SourceToken -> Parser (Name N.ModuleName)
+upperToModuleName tok = case tokValue tok of
+  TokUpperName q a -> do
+    let ns = q <> [a]
+    when (not (all isValidModuleNamespace ns)) $ addFailure [tok] ErrModuleName
+    pure . Name tok . N.ModuleName $ N.ProperName <$> ns
+  _ -> internalError $ "Invalid upper name: " <> show tok
+
+toQualifiedName :: (Text -> a) -> SourceToken -> Parser (QualifiedName a)
+toQualifiedName k tok = case tokValue tok of
   TokLowerName q a
-    | not (Set.member a reservedNames) -> pure $ Ident tok q a
-    | otherwise -> addFailure [tok] ErrKeywordVar $> unexpected tok
-  _ -> internalError $ "Invalid variable token: " <> show tok
+    | not (Set.member a reservedNames) -> flip (QualifiedName tok) (k a) <$> toModuleName tok q
+    | otherwise -> addFailure [tok] ErrKeywordVar $> QualifiedName tok Nothing (k "<unexpected>")
+  TokUpperName q a  -> flip (QualifiedName tok) (k a) <$> toModuleName tok q
+  TokSymbolName q a -> flip (QualifiedName tok) (k a) <$> toModuleName tok q
+  TokOperator q a   -> flip (QualifiedName tok) (k a) <$> toModuleName tok q
+  _                 -> internalError $ "Invalid qualified name: " <> show tok
 
-toOperator :: SourceToken -> Ident
-toOperator tok = case tokValue tok of
-  TokOperator q a -> Ident tok q a
-  _ -> internalError $ "Invalid operator token: " <> show tok
+toName :: (Text -> a) -> SourceToken -> Parser (Name a)
+toName k tok = case tokValue tok of
+  TokLowerName [] a
+    | not (Set.member a reservedNames) -> pure $ Name tok (k a)
+    | otherwise -> addFailure [tok] ErrKeywordVar $> Name tok (k "<unexpected>")
+  TokUpperName [] a  -> pure $ Name tok (k a)
+  TokSymbolName [] a -> pure $ Name tok (k a)
+  TokOperator [] a   -> pure $ Name tok (k a)
+  _                  -> internalError $ "Invalid name: " <> show tok
 
-toLabel :: SourceToken -> Ident
+toLabel :: SourceToken -> Label
 toLabel tok = case tokValue tok of
-  TokLowerName [] a -> Ident tok [] a
-  TokString _ a     -> Ident tok [] a
-  TokRawString a    -> Ident tok [] a
-  TokForall ASCII   -> Ident tok [] "forall"
+  TokLowerName [] a -> Label tok a
+  TokString _ a     -> Label tok a
+  TokRawString a    -> Label tok a
+  TokForall ASCII   -> Label tok "forall"
   _                 -> internalError $ "Invalid label: " <> show tok
 
-labelToVar :: Ident -> Parser Ident
-labelToVar (Ident tok _ _) = toVar tok
+labelToIdent :: Label -> Parser (Name Ident)
+labelToIdent (Label tok _) = toName Ident tok
 
 toString :: SourceToken -> (SourceToken, Text)
 toString tok = case tokValue tok of
@@ -128,116 +150,48 @@ toBoolean tok = case tokValue tok of
   TokLowerName [] "false" -> (tok, False)
   _                       -> internalError $ "Invalid boolean literal: " <> show tok
 
-toBinders :: forall a. Monoid a => Expr a -> Parser [Binder a]
-toBinders = convert []
+toConstraint :: forall a. Monoid a => Type a -> Parser (Constraint a)
+toConstraint = convertParens
   where
-  convert :: [Binder a] -> Expr a -> Parser [Binder a]
-  convert acc = \case
-    ExprSection a tok ->
-      pure $ BinderWildcard a tok : acc
-    ExprIdent a ident@(Ident _ [] _) ->
-      pure $ BinderVar a ident : acc
-    ExprConstructor a ident ->
-      pure $ BinderConstructor a ident [] : acc
-    ExprBoolean a tok val ->
-      pure $ BinderBoolean a tok val : acc
-    ExprChar a tok val ->
-      pure $ BinderChar a tok val : acc
-    ExprString a tok val ->
-      pure $ BinderString a tok val : acc
-    ExprNumber a tok val ->
-      pure $ BinderNumber a Nothing tok val : acc
-    ExprArray a del -> do
-      del' <- traverse (traverse (traverse toBinder)) del
-      pure $ BinderArray a del' : acc
-    ExprRecord a del -> do
-      del' <- traverse (traverse (traverse (traverse toBinder))) del
-      pure $ BinderRecord a del' : acc
-    ExprParens a wrap -> do
-      wrap' <- traverse toBinder wrap
-      pure $ BinderParens a wrap' : acc
-    ExprTyped a expr tok ty -> do
-      expr' <- toBinder expr
-      pure $ BinderTyped a expr' tok ty : acc
-    ExprOp a lhs op@(Ident tok [] "@") rhs ->
-      case lhs of
-        ExprIdent a' ident -> do
-          rhs' <- toBinders rhs
-          pure $ BinderNamed (a <> a') ident tok (head rhs') : tail rhs' <> acc
-        ExprApp a' lhs' (ExprIdent a'' ident) -> do
-          rhs' <- toBinders rhs
-          convert (BinderNamed (a <> a' <> a'') ident tok (head rhs') : tail rhs' <> acc) lhs'
-        ExprOp a' lhs' op' (ExprIdent a'' ident) -> do
-          convert acc $ ExprOp a' lhs' op' (ExprOp a (ExprIdent a'' ident) op rhs)
-        ExprOp a' lhs' op' (ExprApp a'' rhs'' (ExprIdent a''' ident)) -> do
-          rhs' <- toBinders rhs
-          convert (BinderNamed (a <> a'' <> a''') ident tok (head rhs') : tail rhs' <> acc) $ ExprOp a' lhs' op' rhs''
-        _ -> unexpectedToks exprRange (pure . unexpectedBinder) ErrExprInBinder lhs
-    ExprOp a lhs op rhs -> do
-      lhs' <- toBinder lhs
-      rhs' <- toBinder rhs
-      pure $ BinderOp a lhs' op rhs' : acc
-    ExprApp _ lhs rhs -> do
-      rhs' <- toBinders rhs
-      convert (rhs' <> acc) lhs
-    expr -> unexpectedToks exprRange (pure . unexpectedBinder) ErrExprInBinder expr
+  convertParens :: Type a -> Parser (Constraint a)
+  convertParens = \case
+    TypeParens a (Wrapped b c d) -> do
+      c' <- convertParens c
+      pure $ ConstraintParens a (Wrapped b c' d)
+    ty -> convert mempty [] ty
 
-toBinderAtoms :: forall a. Monoid a => Expr a -> Parser [Binder a]
-toBinderAtoms expr = do
-  bs <- toBinders expr
-  for bs $ \b -> do
-    let err = unexpectedToks binderRange unexpectedBinder ErrExprInBinder b
-    case b of
-      BinderOp {} -> err
-      BinderTyped {} -> err
-      _ -> pure b
+  convert :: a -> [Type a] -> Type a -> Parser (Constraint a)
+  convert ann acc = \case
+    TypeApp a lhs rhs -> convert (a <> ann) (rhs : acc) lhs
+    TypeConstructor a name -> pure $ Constraint (a <> ann) (coerce name) acc
+    ty -> do
+      let (tok1, tok2) = typeRange ty
+      addFailure [tok1, tok2] ErrTypeInConstraint
+      pure $ Constraint mempty (QualifiedName tok1 Nothing (N.ProperName "<unexpected")) []
 
-toBinder :: forall a. Monoid a => Expr a -> Parser (Binder a)
-toBinder expr = do
-  bs <- toBinders expr
-  case bs of
-    BinderConstructor a ident [] : args -> pure $ BinderConstructor a ident args
-    BinderNamed a ident tok (BinderConstructor a' ctr []) : args ->
-      pure $ BinderNamed a ident tok $ BinderConstructor a' ctr args
-    a : [] -> pure a
-    _ : _ -> do
-      -- TODO
-      let toks = fst . binderRange <$> bs
-      addFailure toks ErrExprInBinder
-      pure $ unexpectedBinder toks
-    [] -> internalError "Empty binder set"
+toBinderConstructor :: Monoid a => NE.NonEmpty (Binder a) -> Parser (Binder a)
+toBinderConstructor = \case
+  BinderConstructor a name [] NE.:| bs ->
+    pure $ BinderConstructor a name bs
+  a NE.:| [] -> pure a
+  a NE.:| _ -> unexpectedToks binderRange (unexpectedBinder) ErrExprInBinder a
 
-toDeclOrBinder :: forall a. Monoid a => Expr a -> Parser (Either (a, Ident, [Binder a]) (Binder a))
-toDeclOrBinder expr = do
-  bs <- toBinders expr
-  case bs of
-    BinderVar a ident : args -> pure $ Left (a, ident, args)
-    BinderConstructor a ident [] : args -> pure $ Right $ BinderConstructor a ident args
-    a : [] -> pure $ Right $ a
-    _ : _ -> do
-      -- TODO
-      let toks = fst . binderRange <$> bs
-      addFailure toks ErrExprInDeclOrBinder
-      pure $ Right $ unexpectedBinder toks
-    [] -> internalError "Empty binder set"
-
-toDecl
-  :: forall a r
-   . Monoid a
-  => (a -> ValueBindingFields a -> r)
-  -> ([SourceToken] -> r)
-  -> Expr a
-  -> Guarded a
-  -> Parser r
-toDecl ksucc kerr expr guarded = do
-  bs <- toBinders expr
-  case bs of
-    BinderVar a ident : args -> pure $ ksucc a (ValueBindingFields ident args guarded)
-    _ : _ -> do
-      let toks = fst . binderRange <$> bs
-      addFailure toks ErrBinderInDecl
-      pure $ kerr toks
-    [] -> internalError "Empty binder set"
+toLetBinding :: Monoid a => NE.NonEmpty (Binder a) -> Guarded a -> Parser (LetBinding a)
+toLetBinding lhs guarded = case lhs of
+  BinderVar ann ident NE.:| binders ->
+    pure $ LetBindingName ann (ValueBindingFields ident binders guarded)
+  BinderConstructor ann name [] NE.:| binders -> do
+    mkLetBindingPattern $ BinderConstructor ann name binders
+  binder NE.:| [] ->
+    mkLetBindingPattern binder
+  binders ->
+    unexpectedToks binderRange unexpectedLetBinding ErrExprInDeclOrBinder (NE.head binders)
+  where
+  mkLetBindingPattern binder = case guarded of
+    Unconditional tok wh ->
+      pure $ LetBindingPattern mempty binder tok wh
+    Guarded gs ->
+      unexpectedToks guardedExprRange unexpectedLetBinding ErrGuardInLetBinder (NE.head gs)
 
 toRecordFields
   :: Monoid a
@@ -254,7 +208,7 @@ toRecordFields = \case
     unexpectedToks recordUpdateRange unexpectedRecordLabeled ErrRecordUpdateInCtr tok
 
   unRight (Right tok) = pure tok
-  unRight (Left (RecordPun (Ident tok _ _))) = do
+  unRight (Left (RecordPun (Name tok _))) = do
     addFailure [tok] ErrRecordPunInUpdate
     pure $ unexpectedRecordUpdate [tok]
   unRight (Left (RecordField _ tok _)) = do
@@ -265,15 +219,17 @@ checkFundeps :: ClassHead a -> Parser ()
 checkFundeps (ClassHead _ _ _ _ Nothing) = pure ()
 checkFundeps (ClassHead _ _ _ vars (Just (_, fundeps))) = do
   let
-    k (TypeVarKinded (Wrapped _ (Labeled a _ _) _)) = identName a
-    k (TypeVarName a) = identName a
+    k (TypeVarKinded (Wrapped _ (Labeled a _ _) _)) = getIdent $ nameValue a
+    k (TypeVarName a) = getIdent $ nameValue a
     names = k <$> vars
     check a
-      | identName a `elem` names = pure ()
-      | otherwise = addFailure [identTok a] ErrUnknownFundep
-  for_ fundeps $ \(ClassFundep as _ bs) -> do
-    for_ as check
-    for_ bs check
+      | getIdent (nameValue a) `elem` names = pure ()
+      | otherwise = addFailure [nameTok a] ErrUnknownFundep
+  for_ fundeps $ \case
+    FundepDetermined _ bs -> for_ bs check
+    FundepDetermines as _ bs -> do
+      for_ as check
+      for_ bs check
 
 data TmpModuleDecl a
   = TmpImport (ImportDecl a)
@@ -290,41 +246,17 @@ toModuleDecls = goImport []
   goDecl acc (TmpDecl x : xs) = goDecl (x : acc) xs
   goDecl (DeclInstanceChain a (Separated h t) : acc) (TmpChain tok (DeclInstanceChain a' (Separated h' t')) : xs) = do
     let getName = instName . instHead
-    when (getName h == getName h') $ addFailure [identTok $ getName h'] ErrInstanceNameMismatch
+    when (getName h == getName h') $ addFailure [nameTok $ getName h'] ErrInstanceNameMismatch
     goDecl (DeclInstanceChain (a <> a') (Separated h (t <> ((tok, h') : t'))) : acc) xs
   goDecl _ (TmpChain tok _ : _) = addFailure [tok] ErrElseInDecl $> [unexpectedDecl [tok]]
   goDecl _ (TmpImport imp : _) = unexpectedToks importDeclRange (pure . unexpectedDecl) ErrImportInDecl imp
-
-varToType :: Monoid a => TypeVarBinding a -> Type a
-varToType (TypeVarKinded (Wrapped l (Labeled var tok kind) r)) =
-  TypeParens mempty
-    (Wrapped l
-      (TypeKinded mempty
-        (TypeVar mempty var) tok kind) r)
-varToType (TypeVarName ident) =
-  TypeVar mempty ident
-
-toLetBinding :: Monoid a => Expr a -> Guarded a -> Parser (LetBinding a)
-toLetBinding lhs guarded = do
-  b <- toDeclOrBinder lhs
-  case b of
-    Left (ann, ident, binders) ->
-      pure $ LetBindingName ann (ValueBindingFields ident binders guarded)
-    Right binder ->
-      case guarded of
-        Unconditional tok expr ->
-          pure $ LetBindingPattern mempty binder tok expr
-        Guarded (g : _) ->
-          unexpectedToks guardedExprRange unexpectedLetBinding ErrGuardInLetBinder g
-        Guarded _ ->
-          internalError "Empty guard set"
 
 checkNoWildcards :: Type a -> Parser ()
 checkNoWildcards ty = do
   let
     k = \case
       TypeWildcard _ a -> [addFailure [a] ErrWildcardInType]
-      TypeHole _ a -> [addFailure [identTok a] ErrHoleInType]
+      TypeHole _ a -> [addFailure [nameTok a] ErrHoleInType]
       _ -> []
   sequence_ $ everythingOnTypes (<>) k ty
 
@@ -355,3 +287,6 @@ reservedNames = Set.fromList
   , "type"
   , "where"
   ]
+
+isValidModuleNamespace :: Text -> Bool
+isValidModuleNamespace = Text.null . snd . Text.span (\c -> c /= '_' && c /= '\'')

@@ -346,10 +346,10 @@ insertLayout src@(SourceToken tokAnn tok) nextPos stack =
   sepP lytPos =
     srcColumn tokPos == srcColumn lytPos && srcLine tokPos /= srcLine lytPos
 
-unwindLayout :: SourcePos -> LayoutStack -> [SourceToken]
-unwindLayout pos = go
+unwindLayout :: SourcePos -> [Comment LineFeed] -> LayoutStack -> [SourceToken]
+unwindLayout pos leading = go
   where
   go [] = []
-  go ((_, LytRoot) : _) = [lytToken pos TokEof]
+  go ((_, LytRoot) : _) = [SourceToken (TokenAnn (SourceRange pos pos) leading []) TokEof]
   go ((_, lyt) : stk) | isIndented lyt = lytToken pos TokLayoutEnd : go stk
   go (_ : stk) = go stk

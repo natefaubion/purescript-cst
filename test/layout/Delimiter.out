@@ -11,3 +11,4 @@ test3 = do{
   ) == 12;
   baz};
 test4 = c}
+<eof>

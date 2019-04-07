@@ -4,25 +4,40 @@ module Language.PureScript.CST.Parser
   , parseKind
   , parseExpr
   , parseModule
+  , parseModuleHeader
   , parse
   ) where
 
-import Prelude
+import Prelude hiding (lex)
 
+import Control.Monad ((>=>), when)
 import Data.Foldable (foldl', for_)
+import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
+import Data.Traversable (for)
 import Language.PureScript.CST.Errors
 import Language.PureScript.CST.Lexer
 import Language.PureScript.CST.Monad
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Types
 import Language.PureScript.CST.Utils
+import qualified Language.PureScript.Names as N
 }
 
 %name parseKind kind
 %name parseType type
 %name parseExpr expr
 %name parseModule module
+%partial parseModuleHeader moduleHeader
+%partial parseDoStatement doStatement
+%partial parseDoBinder doBinder
+%partial parseDoExpr doExpr
+%partial parseDoNext doNext
+%partial parseGuardBinder guardBinder
+%partial parseGuardExpr guardExpr
+%partial parseGuardNext guardNext
+%partial parseClassSuper classSuper
+%partial parseClassNameAndFundeps classNameAndFundeps
 %tokentype { SourceToken }
 %monad { Parser }
 %error { parseError }
@@ -85,10 +100,10 @@ import Language.PureScript.CST.Utils
   'where'         { SourceToken _ (TokLowerName [] "where") }
   '(->)'          { SourceToken _ (TokSymbolArr _) }
   '(..)'          { SourceToken _ (TokSymbolName [] "..") }
-  IDENT           { SourceToken _ (TokLowerName [] _) }
-  QUAL_IDENT      { SourceToken _ (TokLowerName _ _) }
-  PROPER          { SourceToken _ (TokUpperName [] _) }
-  QUAL_PROPER     { SourceToken _ (TokUpperName _ _) }
+  LOWER           { SourceToken _ (TokLowerName [] _) }
+  QUAL_LOWER      { SourceToken _ (TokLowerName _ _) }
+  UPPER           { SourceToken _ (TokUpperName [] _) }
+  QUAL_UPPER      { SourceToken _ (TokUpperName _ _) }
   SYMBOL          { SourceToken _ (TokSymbolName [] _) }
   QUAL_SYMBOL     { SourceToken _ (TokSymbolName _ _) }
   OPERATOR        { SourceToken _ (TokOperator [] _) }
@@ -102,27 +117,27 @@ import Language.PureScript.CST.Utils
 
 %%
 
-many(a) :: { [_] }
-  : many0(a) { reverse $1 }
+many(a) :: { NE.NonEmpty _ }
+  : many0(a) { NE.reverse $1 }
 
-many0(a) :: { [_] }
-  : a { [$1] }
-  | many0(a) a { $2 : $1 }
+many0(a) :: { NE.NonEmpty _ }
+  : a { pure $1 }
+  | many0(a) a { NE.cons $2 $1 }
 
-manySep(a, sep) :: { [_] }
-  : manySep0(a, sep) { reverse $1 }
+manySep(a, sep) :: { NE.NonEmpty _ }
+  : manySep0(a, sep) { NE.reverse $1 }
 
-manySep0(a, sep) :: { [_] }
-  : a { [$1] }
-  | manySep0(a, sep) sep a { $3 : $1 }
+manySep0(a, sep) :: { NE.NonEmpty _ }
+  : a { pure $1 }
+  | manySep0(a, sep) sep a { NE.cons $3 $1 }
 
 manySepOrEmpty(a, sep) :: { [_] }
   : {- empty -} { [] }
-  | manySep(a, sep) { $1 }
+  | manySep(a, sep) { NE.toList $1 }
 
 manyOrEmpty(a) :: { [_] }
   : {- empty -} { [] }
-  | many(a) { $1 }
+  | many(a) { NE.toList $1 }
 
 sep(a, s) :: { Separated _ }
   : sep0(a, s) { separated $1 }
@@ -135,48 +150,56 @@ delim(a, b, c, d) :: { Delimited _ }
   : a d { Wrapped $1 Nothing $2 }
   | a sep(b, c) d { Wrapped $1 (Just $2) $3 }
 
-properIdent :: { Ident }
-  : PROPER { toIdent $1 }
-  | QUAL_PROPER { toIdent $1 }
+moduleName :: { Name N.ModuleName }
+  : UPPER {% upperToModuleName $1 }
+  | QUAL_UPPER {% upperToModuleName $1 }
 
-proper :: { Ident }
-  : PROPER { toIdent $1 }
+qualProperName :: { QualifiedName (N.ProperName a) }
+  : UPPER {% toQualifiedName N.ProperName $1 }
+  | QUAL_UPPER {% toQualifiedName N.ProperName $1 }
 
-ident :: { Ident }
-  : IDENT { toIdent $1 }
-  | QUAL_IDENT { toIdent $1 }
-  | 'as' { toIdent $1 }
-  | 'hiding' { toIdent $1 }
-  | 'kind' { toIdent $1 }
+properName :: { Name (N.ProperName a) }
+  : UPPER {% toName N.ProperName $1 }
 
-var :: { Ident }
-  : IDENT {% toVar $1 }
-  | 'as' {% toVar $1 }
-  | 'kind' {% toVar $1 }
-  | 'hiding' { toIdent $1 }
+qualIdent :: { QualifiedName Ident }
+  : LOWER {% toQualifiedName Ident $1 }
+  | QUAL_LOWER {% toQualifiedName Ident $1 }
+  | 'as' {% toQualifiedName Ident $1 }
+  | 'hiding' {% toQualifiedName Ident $1 }
+  | 'kind' {% toQualifiedName Ident $1 }
 
-op :: { Ident }
-  : OPERATOR { toOperator $1 }
-  | '<=' { toOperator $1 }
-  | '-' { toOperator $1 }
-  | '@' { toOperator $1 }
-  | '#' { toOperator $1 }
-  | ':' { toOperator $1 }
+ident :: { Name Ident }
+  : LOWER {% toName Ident $1 }
+  | 'as' {% toName Ident $1 }
+  | 'hiding' {% toName Ident $1 }
+  | 'kind' {% toName Ident $1 }
 
-opIdent :: { Ident }
-  : op { $1 }
-  | QUAL_OPERATOR { toOperator $1 }
+qualOp :: { QualifiedName (N.OpName a) }
+  : OPERATOR {% toQualifiedName N.OpName $1 }
+  | QUAL_OPERATOR {% toQualifiedName N.OpName $1 }
+  | '<=' {% toQualifiedName N.OpName $1 }
+  | '-' {% toQualifiedName N.OpName $1 }
+  | '#' {% toQualifiedName N.OpName $1 }
+  | ':' {% toQualifiedName N.OpName $1 }
 
-symbol :: { Ident }
-  : SYMBOL { toIdent $1 }
-  | '(..)' { toIdent $1 }
+op :: { Name (N.OpName a) }
+  : OPERATOR {% toName N.OpName $1 }
+  | '<=' {% toName N.OpName $1 }
+  | '-' {% toName N.OpName $1 }
+  | '#' {% toName N.OpName $1 }
+  | ':' {% toName N.OpName $1 }
 
-symbolIdent :: { Ident }
-  : symbol { $1 }
-  | QUAL_SYMBOL { toIdent $1 }
+qualSymbol :: { QualifiedName (N.OpName a) }
+  : SYMBOL {% toQualifiedName N.OpName $1 }
+  | '(..)' {% toQualifiedName N.OpName $1 }
 
-label :: { Ident }
-  : IDENT { toLabel $1 }
+symbol :: { Name (N.OpName a) }
+  : SYMBOL {% toName N.OpName $1 }
+  | QUAL_SYMBOL {% toName N.OpName $1 }
+  | '(..)' {% toName N.OpName $1 }
+
+label :: { Label }
+  : LOWER { toLabel $1 }
   | LIT_STRING { toLabel $1 }
   | LIT_RAW_STRING { toLabel $1 }
   | 'ado' { toLabel $1 }
@@ -208,8 +231,8 @@ label :: { Ident }
   | 'type' { toLabel $1 }
   | 'where' { toLabel $1 }
 
-hole :: { Ident }
-  : LIT_HOLE { toIdent $1 }
+hole :: { Name Ident }
+  : LIT_HOLE {% toName Ident $1 }
 
 string :: { (SourceToken, Text) }
   : LIT_STRING { toString $1 }
@@ -234,7 +257,7 @@ kind :: { Kind () }
   | kind0 '->' kind { KindArr () $1 $2 $3 }
 
 kind0 :: { Kind () }
-  : properIdent { KindName () $1 }
+  : qualProperName { KindName () $1 }
   | '#' kind0 { KindRow () $1 $2 }
   | '(' kind ')' { KindParens () (Wrapped $1 $2 $3) }
 
@@ -245,11 +268,11 @@ type :: { Type () }
 type0 :: { Type () }
   : type1 { $1 }
   | type1 '->' type { TypeArr () $1 $2 $3 }
-  | type1 '=>' type { TypeConstrained () $1 $2 $3 }
+  | type1 '=>' type {% do cs <- toConstraint $1; pure $ TypeConstrained () cs $2 $3 }
 
 type1 :: { Type () }
   : type2 { $1 }
-  | type1 opIdent type2 { TypeOp () $1 $2 $3 }
+  | type1 qualOp type2 { TypeOp () $1 $2 $3 }
 
 type2 :: { Type () }
   : typeAtom { $1 }
@@ -257,9 +280,9 @@ type2 :: { Type () }
 
 typeAtom :: { Type ()}
   : '_' { TypeWildcard () $1 }
-  | var { TypeVar () $1 }
-  | properIdent { TypeConstructor () $1 }
-  | symbolIdent { TypeOpName () $1 }
+  | ident { TypeVar () $1 }
+  | qualProperName { TypeConstructor () $1 }
+  | qualSymbol { TypeOpName () $1 }
   | string { uncurry (TypeString ()) $1 }
   | hole { TypeHole () $1 }
   | '(->)' { TypeArrName () $1 }
@@ -270,8 +293,8 @@ typeAtom :: { Type ()}
 
 typeKindedAtom :: { Type () }
   : '_' { TypeWildcard () $1 }
-  | properIdent { TypeConstructor () $1 }
-  | symbolIdent { TypeOpName () $1 }
+  | qualProperName { TypeConstructor () $1 }
+  | qualSymbol { TypeOpName () $1 }
   | hole { TypeHole () $1 }
   | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
   | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
@@ -284,20 +307,20 @@ row :: { Row () }
   | sep(rowLabel, ',') { Row (Just $1) Nothing }
   | sep(rowLabel, ',') '|' type { Row (Just $1) (Just ($2, $3)) }
 
-rowLabel :: { Labeled (Type ()) }
+rowLabel :: { Labeled Label (Type ()) }
   : label '::' type { Labeled $1 $2 $3 }
 
 typeVarBinding :: { TypeVarBinding () }
-  : var { TypeVarName $1 }
-  | '(' var '::' kind ')' { TypeVarKinded (Wrapped $1 (Labeled $2 $3 $4) $5) }
+  : ident { TypeVarName $1 }
+  | '(' ident '::' kind ')' { TypeVarKinded (Wrapped $1 (Labeled $2 $3 $4) $5) }
 
 forall :: { SourceToken }
   : 'forall' { $1 }
   | 'forallu' { $1 }
 
-exprWhere :: { Expr () }
-  : expr { $1 }
-  | expr 'where' '\{' manySep(letBinding, '\;') '\}' { ExprWhere () (Where $1 $2 $4) }
+exprWhere :: { Where () }
+  : expr { Where $1 Nothing }
+  | expr 'where' '\{' manySep(letBinding, '\;') '\}' { Where $1 (Just ($2, $4)) }
 
 expr :: { Expr () }
   : expr0 { $1 }
@@ -305,7 +328,7 @@ expr :: { Expr () }
 
 expr0 :: { Expr () }
   : expr1 { $1 }
-  | expr0 opIdent expr1 { ExprOp () $1 $2 $3 }
+  | expr0 qualOp expr1 { ExprOp () $1 $2 $3 }
 
 expr1 :: { Expr () }
   : expr2 { $1 }
@@ -313,7 +336,7 @@ expr1 :: { Expr () }
 
 exprBacktick :: { Expr () }
   : expr2 { $1 }
-  | exprBacktick opIdent expr2 { ExprOp () $1 $2 $3 }
+  | exprBacktick qualOp expr2 { ExprOp () $1 $2 $3 }
 
 expr2 :: { Expr () }
   : expr3 { $1 }
@@ -333,19 +356,19 @@ expr3 :: { Expr () }
 expr4 :: { Expr () }
   : expr5 { $1 }
   | 'if' expr 'then' expr 'else' expr { ExprIf () (IfThenElse $1 $2 $3 $4 $5 $6) }
-  | 'do' '\{' manySep(doStatement, '\;') '\}' { ExprDo () (DoBlock $1 $3) }
-  | 'ado' '\{' manySepOrEmpty(doStatement, '\;') '\}' 'in' expr { ExprAdo () (AdoBlock $1 $3 $5 $6) }
-  | '\\' expr0 '->' expr {% do bs <- toBinderAtoms $2; pure $ ExprLambda () (Lambda $1 bs $3 $4) }
+  | doBlock { ExprDo () $1 }
+  | adoBlock 'in' expr { ExprAdo () $ uncurry AdoBlock $1 $2 $3 }
+  | '\\' many(binderAtom) '->' expr { ExprLambda () (Lambda $1 $2 $3 $4) }
   | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
   | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
   -- These special cases handle some idiosynchratic syntax that the current
   -- parse allows. Technically the parser allows the rhs of a case branch to
   -- be at any level, but this is ambiguous. We allow it in the case of a
   -- singleton case, since this is used in the wild.
-  | 'case' sep(expr, ',') 'of' '\{' sep(expr0, ',') '->' '\}' exprWhere
-      {% do bs <- traverse toBinder $5; pure $ ExprCase () (CaseOf $1 $2 $3 [(bs, Unconditional $6 $8)]) }
-  | 'case' sep(expr, ',') 'of' '\{' sep(expr0, ',') '\}' guarded('->')
-      {% do bs <- traverse toBinder $5; pure $ ExprCase () (CaseOf $1 $2 $3 [(bs, $7)]) }
+  | 'case' sep(expr, ',') 'of' '\{' sep(binder0, ',') '->' '\}' exprWhere
+      { ExprCase () (CaseOf $1 $2 $3 (pure ($5, Unconditional $6 $8))) }
+  | 'case' sep(expr, ',') 'of' '\{' sep(binder0, ',') '\}' guarded('->')
+      { ExprCase () (CaseOf $1 $2 $3 (pure ($5, $7))) }
 
 expr5 :: { Expr () }
   : expr6 { $1 }
@@ -363,32 +386,25 @@ expr6 :: { Expr () }
 exprAtom :: { Expr () }
   : '_' { ExprSection () $1 }
   | hole { ExprHole () $1 }
-  | ident { ExprIdent () $1 }
-  | properIdent { ExprConstructor () $1 }
-  | symbolIdent { ExprOpName () $1 }
+  | qualIdent { ExprIdent () $1 }
+  | qualProperName { ExprConstructor () $1 }
+  | qualSymbol { ExprOpName () $1 }
   | boolean { uncurry (ExprBoolean ()) $1 }
   | char { uncurry (ExprChar ()) $1 }
   | string { uncurry (ExprString ()) $1 }
   | number { uncurry (ExprNumber ()) $1 }
-  | array { ExprArray () $1 }
-  | record { ExprRecord () $1 }
+  | delim('[', expr, ',', ']') { ExprArray () $1 }
+  | delim('{', recordLabel, ',', '}') { ExprRecord () $1 }
   | '(' expr ')' { ExprParens () (Wrapped $1 $2 $3) }
-  | error {%% recover ErrExpr unexpectedExpr }
-
-array :: { Delimited (Expr ()) }
-  : delim('[', expr, ',', ']') { $1 }
-
-record :: { Delimited (RecordLabeled (Expr ())) }
-  : delim('{', recordLabel, ',', '}') { $1 }
 
 recordLabel :: { RecordLabeled (Expr ()) }
-  : label {% fmap RecordPun (labelToVar $1) }
-  | label '=' expr {% do addFailure [$2] ErrRecordUpdateInCtr; pure $ RecordPun $ unexpected $ identTok $1 }
+  : label {% fmap RecordPun . toName Ident $ lblTok $1 }
+  | label '=' expr {% do addFailure [$2] ErrRecordUpdateInCtr; pure . RecordPun . unexpectedName $ lblTok $1 }
   | label ':' expr { RecordField $1 $2 $3 }
 
 recordUpdateOrLabel :: { Either (RecordLabeled (Expr ())) (RecordUpdate ()) }
   : label ':' expr { Left (RecordField $1 $2 $3) }
-  | label {% fmap (Left . RecordPun) (labelToVar $1) }
+  | label {% fmap (Left . RecordPun) . toName Ident $ lblTok $1 }
   | label '=' expr { Right (RecordUpdateLeaf $1 $2 $3) }
   | label '{' sep(recordUpdate, ',') '}' { Right (RecordUpdateBranch $1 (Wrapped $2 $3 $4)) }
 
@@ -397,35 +413,151 @@ recordUpdate :: { RecordUpdate () }
   | label '{' sep(recordUpdate, ',') '}' { RecordUpdateBranch $1 (Wrapped $2 $3 $4) }
 
 letBinding :: { LetBinding () }
-  : var '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
-  | expr0 guarded('=') {% toLetBinding $1 $2 }
-  | expr0 {%% recover ErrLetBinding (unexpectedLetBinding . (fst (exprRange $1) :)) }
+  : ident '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
+  | many(binderAtom) guarded('=') {% toLetBinding $1 $2 }
 
 caseBranch :: { (Separated (Binder ()), Guarded ()) }
-  : sep(expr0, ',') guarded('->') {% do bs <- traverse toBinder $1; pure (bs, $2) }
+  : sep(binder0, ',') guarded('->') { ($1, $2) }
 
 guarded(a) :: { Guarded () }
   : a exprWhere { Unconditional $1 $2 }
   | many(guardedExpr(a)) { Guarded $1 }
 
 guardedExpr(a) :: { GuardedExpr () }
-  : '|' sep(patternGuard, ',') a exprWhere { GuardedExpr $1 $2 $3 $4 }
+  : guard a exprWhere { uncurry GuardedExpr $1 $2 $3 }
 
-patternGuard :: { PatternGuard () }
-  : expr0 { PatternGuard Nothing $1 }
-  | expr '<-' expr0 {% do b <- toBinder $1; pure $ PatternGuard (Just (b, $2)) $3 }
+-- Do/Ado statements and pattern guards require unbounded lookahead due to many
+-- conflicts between `binder` and `expr` syntax. For example `Foo a b c` can
+-- either be a constructor `binder` or several `expr` applications, and we won't
+-- know until we see a `<-` or layout separator.
+--
+-- One way to resolve this would be to parse a `binder` as an `expr` and then
+-- reassociate it after the fact. However this means we can't use the `binder`
+-- productions to parse it, so we'd have to maintain an ad-hoc handwritten
+-- parser which is very difficult to audit.
+--
+-- As an alternative we introduce some backtracking. Using %partial parsers,
+-- we can encode the state transitions and use the backtracking `tryPrefix`
+-- combinator. Binders are generally very short in comparison to expressions,
+-- so the cost is modest.
+--
+--     doBlock
+--       : 'do' '\{' manySep(doStatement, '\;') '\}'
+--
+--     doStatement
+--       : 'let' '\{' manySep(letBinding, '\;') '\}'
+--       | expr
+--       | binder '<-' expr
+--
+--     guard
+--       : '|' sep(patternGuard, ',')
+--
+--     patternGuard
+--       : expr0
+--       | expr '<-' expr0
+--
+doBlock
+  : 'do' '\{'
+      {%% \lk -> do
+        pushBack lk
+        res <- parseDoStatement
+        when (null res) $ addFailure [$2] ErrEmptyDo
+        pure $ DoBlock $1 $ NE.fromList res
+      }
 
-doStatement :: { DoStatement () }
-  : 'let' '\{' manySep(letBinding, '\;') '\}' { DoLet $1 $3 }
-  | expr { DoDiscard $1 }
-  | expr '<-' expr {% do b <- toBinder $1; pure $ DoBind b $2 $3 }
+adoBlock
+  : 'ado' '\{'
+      {%% \lk -> pushBack lk *> fmap ($1,) parseDoStatement }
+
+doStatement
+  : 'let' '\{' manySep(letBinding, '\;') '\}'
+      {%^ \lk -> pushBack lk *> fmap (DoLet $1 $3 :) parseDoNext }
+  | error
+      {%^ \lk -> do
+        pushBack lk
+        stmt <- tryPrefix parseDoBinder parseDoExpr
+        let
+          ctr = case stmt of
+            (Just (binder, sep), expr) ->
+              (DoBind binder sep expr :)
+            (Nothing, expr) ->
+              (DoDiscard expr :)
+        fmap ctr parseDoNext
+      }
+
+doBinder
+  : binder '<-' {%^ \lk -> pushBack lk *> pure ($1, $2) }
+
+doExpr
+  : expr {%^ \lk -> pushBack lk *> pure $1 }
+
+doNext
+  : '\;' {%^ \lk -> pushBack lk *> parseDoStatement }
+  | '\}' {%^ \lk -> pushBack lk *> pure [] }
+
+guard :: { (SourceToken, Separated (PatternGuard ())) }
+  : '|'
+      {%% \lk -> do
+        pushBack lk
+        (binder, expr) <- tryPrefix parseGuardBinder parseGuardExpr
+        fmap (($1,) . Separated (PatternGuard binder expr)) parseGuardNext
+      }
+
+guardBinder :: { (Binder (), SourceToken) }
+  : binder '<-' {%^ \lk -> pushBack lk *> pure ($1, $2) }
+
+guardExpr :: { Expr() }
+  : expr0 {%^ \lk -> pushBack lk *> pure $1 }
+
+guardNext :: { [(SourceToken, PatternGuard ())] }
+  : ','
+      {%^ \lk -> do
+        pushBack lk
+        (binder, expr) <- tryPrefix parseGuardBinder parseGuardExpr
+        fmap (($1, PatternGuard binder expr) :) parseGuardNext
+      }
+  | {- empty -} {%^ \lk -> pushBack lk *> pure [] }
+
+binder :: { Binder () }
+  : binder0 { $1 }
+  | binder0 '::' type { BinderTyped () $1 $2 $3 }
+
+binder0 :: { Binder () }
+  : binder1 { $1 }
+  | binder0 qualOp binder1 { BinderOp () $1 $2 $3 }
+
+binder1 :: { Binder () }
+  : many(binderAtom) {% toBinderConstructor $1 }
+
+binderAtom :: { Binder () }
+  : '_' { BinderWildcard () $1 }
+  | ident { BinderVar () $1 }
+  | ident '@' binderAtom { BinderNamed () $1 $2 $3 }
+  | qualProperName { BinderConstructor () $1 [] }
+  | boolean { uncurry (BinderBoolean ()) $1 }
+  | char { uncurry (BinderChar ()) $1 }
+  | string { uncurry (BinderString ()) $1 }
+  | number { uncurry (BinderNumber () Nothing) $1 }
+  | '-' number { uncurry (BinderNumber () (Just $1)) $2 }
+  | delim('[', binder, ',', ']') { BinderArray () $1 }
+  | delim('{', recordBinder, ',', '}') { BinderRecord () $1 }
+  | '(' binder ')' { BinderParens () (Wrapped $1 $2 $3) }
+
+recordBinder :: { RecordLabeled (Binder ()) }
+  : label {% fmap RecordPun . toName Ident $ lblTok $1 }
+  | label '=' binder {% do addFailure [$2] ErrRecordUpdateInCtr; pure . RecordPun . unexpectedName $ lblTok $1 }
+  | label ':' binder { RecordField $1 $2 $3 }
 
 module :: { Module () }
-  : 'module' properIdent exports 'where' '\{' moduleDecls '\}'
-      {% fmap (uncurry (Module () $1 $2 $3 $4) $6) getLeadingComments }
+  : 'module' moduleName exports 'where' '\{' moduleDecls '\}'
+      {%^ \(SourceToken ann _) -> pure $ uncurry (Module () $1 $2 $3 $4) $6 (tokLeadingComments ann) }
+
+moduleHeader :: { Module () }
+  : 'module' moduleName exports 'where' '\{' manySepOrEmpty(importDecl, '\;')
+      { Module () $1 $2 $3 $4 $6 [] [] }
 
 moduleDecls :: { ([ImportDecl ()], [Declaration ()]) }
-  : manySep(moduleDecl, '\;') {% toModuleDecls $1 }
+  : manySep(moduleDecl, '\;') {% toModuleDecls $ NE.toList $1 }
   | {- empty -} { ([], []) }
 
 moduleDecl :: { TmpModuleDecl a }
@@ -439,23 +571,23 @@ exports :: { Maybe (DelimitedNonEmpty (Export ())) }
   | '(' sep(export, ',') ')' { Just (Wrapped $1 $2 $3) }
 
 export :: { Export () }
-  : var { ExportValue () $1 }
+  : ident { ExportValue () $1 }
   | symbol { ExportOp () $1 }
-  | proper { ExportType () $1 Nothing }
-  | proper dataMembers { ExportType () $1 (Just $2) }
+  | properName { ExportType () $1 Nothing }
+  | properName dataMembers { ExportType () $1 (Just $2) }
   | 'type' symbol { ExportTypeOp () $1 $2 }
-  | 'class' proper { ExportClass () $1 $2 }
-  | 'kind' proper { ExportKind () $1 $2 }
-  | 'module' properIdent { ExportModule () $1 $2 }
+  | 'class' properName { ExportClass () $1 $2 }
+  | 'kind' properName { ExportKind () $1 $2 }
+  | 'module' moduleName { ExportModule () $1 $2 }
 
 dataMembers :: { (DataMembers ()) }
  : '(..)' { DataAll () $1 }
  | '(' ')' { DataEnumerated () (Wrapped $1 Nothing $2) }
- | '(' sep(proper, ',') ')' { DataEnumerated () (Wrapped $1 (Just $2) $3) }
+ | '(' sep(properName, ',') ')' { DataEnumerated () (Wrapped $1 (Just $2) $3) }
 
 importDecl :: { ImportDecl () }
-  : 'import' properIdent imports { ImportDecl () $1 $2 $3 Nothing }
-  | 'import' properIdent imports 'as' properIdent { ImportDecl () $1 $2 $3 (Just ($4, $5)) }
+  : 'import' moduleName imports { ImportDecl () $1 $2 $3 Nothing }
+  | 'import' moduleName imports 'as' moduleName { ImportDecl () $1 $2 $3 (Just ($4, $5)) }
 
 imports :: { Maybe (Maybe SourceToken, DelimitedNonEmpty (Import ())) }
   : {- empty -} { Nothing }
@@ -463,19 +595,19 @@ imports :: { Maybe (Maybe SourceToken, DelimitedNonEmpty (Import ())) }
   | 'hiding' '(' sep(import, ',') ')' { Just (Just $1, Wrapped $2 $3 $4) }
 
 import :: { Import () }
-  : var { ImportValue () $1 }
+  : ident { ImportValue () $1 }
   | symbol { ImportOp () $1 }
-  | proper { ImportType () $1 Nothing }
-  | proper dataMembers { ImportType () $1 (Just $2) }
+  | properName { ImportType () $1 Nothing }
+  | properName dataMembers { ImportType () $1 (Just $2) }
   | 'type' symbol { ImportTypeOp () $1 $2 }
-  | 'class' proper { ImportClass () $1 $2 }
-  | 'kind' proper { ImportKind () $1 $2 }
+  | 'class' properName { ImportClass () $1 $2 }
+  | 'kind' properName { ImportKind () $1 $2 }
 
 decl :: { Declaration () }
   : dataHead { DeclData () $1 Nothing }
   | dataHead '=' sep(dataCtor, '|') { DeclData () $1 (Just ($2, $3)) }
   | typeHead '=' type {% do checkNoWildcards $3; pure (DeclType () $1 $2 $3) }
-  | newtypeHead '=' properIdent typeAtom {% do checkNoWildcards $4; pure (DeclNewtype () $1 $2 $3 $4) }
+  | newtypeHead '=' properName typeAtom {% do checkNoWildcards $4; pure (DeclNewtype () $1 $2 $3 $4) }
   | classHead {% do checkFundeps $1; pure $ DeclClass () $1 Nothing }
   | classHead 'where' '\{' manySep(classMember, '\;') '\}'
       {% do checkFundeps $1; pure $ DeclClass () $1 (Just ($2, $4)) }
@@ -485,90 +617,96 @@ decl :: { Declaration () }
   | 'derive' instHead { DeclDerive () $1 Nothing $2 }
   | 'derive' 'newtype' instHead { DeclDerive () $1 (Just $2) $3 }
   | ident '::' type { DeclSignature () (Labeled $1 $2 $3) }
-  | expr0 guarded('=') {% toDecl DeclValue unexpectedDecl $1 $2 }
+  | ident manyOrEmpty(binderAtom) guarded('=') { DeclValue () (ValueBindingFields $1 $2 $3) }
   | fixity { DeclFixity () $1 }
   | 'foreign' 'import' foreign { DeclForeign () $1 $2 $3 }
-  | expr0 error {%% recover ErrExprInDecl (unexpectedDecl . (fst (exprRange $1) :)) }
-  | error {%% recover ErrDecl unexpectedDecl }
 
 dataHead :: { DataHead () }
-  : 'data' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
+  : 'data' properName manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
 typeHead :: { DataHead () }
-  : 'type' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
+  : 'type' properName manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
 newtypeHead :: { DataHead () }
-  : 'newtype' properIdent manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
+  : 'newtype' properName manyOrEmpty(typeVarBinding) { DataHead $1 $2 $3 }
 
 dataCtor :: { DataCtor () }
-  : properIdent manyOrEmpty(typeAtom)
+  : properName manyOrEmpty(typeAtom)
       {% do for_ $2 checkNoWildcards; pure (DataCtor () $1 $2) }
 
+-- Class head syntax requires unbounded lookahead due to a conflict between
+-- row syntax and `typeVarBinding`. `(a :: B)` is either a row in `constraint`
+-- where `B` is a type or a `typeVarBinding` where `B` is a kind. We must see
+-- either a `<=`, `where`, or layout delimiter before deciding which it is.
+--
+--     classHead
+--       : 'class' classNameAndFundeps
+--       | 'class' constraints '<=' classNameAndFundeps
+--
 classHead :: { ClassHead () }
-  : 'class' classNameAndVars fundeps { ClassHead $1 Nothing (fst $2) (snd $2) $3 }
-  -- We need to inline constraints due to the reduce/reduce conflict between
-  -- the class name and vars and constraint syntax.
-  | 'class' classNameAndVars '<=' classNameAndVars fundeps
-      { ClassHead $1
-          (Just (One (foldl' (TypeApp ()) (TypeConstructor () (fst $2)) (fmap varToType (snd $2))), $3))
-          (fst $4)
-          (snd $4)
-          $5 }
-  | 'class' '(' sep(constraint, ',') ')' '<=' classNameAndVars fundeps
-      { ClassHead $1 (Just (Many (Wrapped $2 $3 $4), $5)) (fst $6) (snd $6) $7 }
+  : 'class'
+      {%% \lk -> do
+        pushBack lk
+        let
+          ctr (super, (name, vars, fundeps)) =
+            ClassHead $1 super name vars fundeps
+        fmap ctr $ tryPrefix parseClassSuper parseClassNameAndFundeps
+      }
 
-classNameAndVars :: { (Ident, [TypeVarBinding ()]) }
-  : properIdent manyOrEmpty(typeVarBinding) { ($1, $2) }
+classSuper
+  : constraints '<=' {%^ \lk -> do pushBack lk; pure ($1, $2) }
+
+classNameAndFundeps :: { (Name (N.ProperName 'N.ClassName), [TypeVarBinding ()], Maybe (SourceToken, Separated ClassFundep)) }
+  : properName manyOrEmpty(typeVarBinding) fundeps {%^ \lk -> do pushBack lk; pure ($1, $2, $3) }
 
 fundeps :: { Maybe (SourceToken, Separated ClassFundep) }
   : {- empty -} { Nothing }
   | '|' sep(fundep, ',') { Just ($1, $2) }
 
 fundep :: { ClassFundep }
-  : '->' many(ident) { ClassFundep [] $1 $2 }
-  | many(ident) '->' many(ident) { ClassFundep $1 $2 $3 }
+  : '->' many(ident) { FundepDetermined $1 $2 }
+  | many(ident) '->' many(ident) { FundepDetermines $1 $2 $3 }
 
-classMember :: { Labeled (Type ()) }
+classMember :: { Labeled (Name Ident) (Type ()) }
   : ident '::' type {% do checkNoWildcards $3; pure (Labeled $1 $2 $3) }
 
 instHead :: { InstanceHead () }
-  : 'instance' ident '::' constraints '=>' properIdent manyOrEmpty(typeAtom)
+  : 'instance' ident '::' constraints '=>' qualProperName manyOrEmpty(typeAtom)
       { InstanceHead $1 $2 $3 (Just ($4, $5)) $6 $7 }
-  | 'instance' ident '::' properIdent manyOrEmpty(typeAtom)
+  | 'instance' ident '::' qualProperName manyOrEmpty(typeAtom)
       { InstanceHead $1 $2 $3 Nothing $4 $5 }
 
-constraints :: { OneOrDelimited (Type ()) }
+constraints :: { OneOrDelimited (Constraint ()) }
   : constraint { One $1 }
   | '(' sep(constraint, ',') ')' { Many (Wrapped $1 $2 $3) }
 
-constraint :: { Type () }
-  : properIdent { TypeConstructor () $1 }
-  | properIdent many(typeAtom)
-      {% do for_ $2 checkNoWildcards; pure (foldl' (TypeApp ()) (TypeConstructor () $1) $2) }
+constraint :: { Constraint () }
+  : qualProperName manyOrEmpty(typeAtom) {% do for_ $2 checkNoWildcards; pure (Constraint () $1 $2) }
+  | '(' constraint ')' { ConstraintParens () (Wrapped $1 $2 $3) }
 
 instBinding :: { InstanceBinding () }
   : ident '::' type { InstanceBindingSignature () (Labeled $1 $2 $3) }
-  | expr0 guarded('=') {% toDecl InstanceBindingName unexpectedInstBinding $1 $2 }
+  | ident manyOrEmpty(binderAtom) guarded('=') { InstanceBindingName () (ValueBindingFields $1 $2 $3) }
 
-fixity :: { FixityFields () }
-  : infix int var 'as' op { FixityFields $1 $2 Nothing $3 $4 $5 }
-  | infix int proper 'as' op { FixityFields $1 $2 Nothing $3 $4 $5 }
-  | infix int 'type' proper 'as' op { FixityFields $1 $2 (Just $3) $4 $5 $6 }
+fixity :: { FixityFields }
+  : infix int qualIdent 'as' op { FixityFields $1 $2 (FixityValue (fmap Left $3) $4 $5) }
+  | infix int qualProperName 'as' op { FixityFields $1 $2 (FixityValue (fmap Right $3) $4 $5) }
+  | infix int 'type' qualProperName 'as' op { FixityFields $1 $2 (FixityType $3 $4 $5 $6) }
 
-infix :: { SourceToken }
-  : 'infix' { $1 }
-  | 'infixl' { $1 }
-  | 'infixr' { $1 }
+infix :: { (SourceToken, Fixity) }
+  : 'infix' { ($1, Infix) }
+  | 'infixl' { ($1, Infixl) }
+  | 'infixr' { ($1, Infixr) }
 
 foreign :: { Foreign () }
   : ident '::' type { ForeignValue (Labeled $1 $2 $3) }
-  | 'data' properIdent '::' kind { ForeignData $1 (Labeled $2 $3 $4) }
-  | 'kind' properIdent { ForeignKind $1 $2 }
+  | 'data' properName '::' kind { ForeignData $1 (Labeled $2 $3 $4) }
+  | 'kind' properName { ForeignKind $1 $2 }
 
 {
 lexer :: (SourceToken -> Parser a) -> Parser a
 lexer k = munch >>= k
 
-parse :: Text -> Either [ParserError] (Module ())
-parse src = runParser (initialParserState src) parseModule
+parse :: Text -> Either (NE.NonEmpty ParserError) (Module ())
+parse src = snd $ runParser (ParserState (lex src) []) parseModule
 }

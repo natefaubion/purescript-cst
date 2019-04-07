@@ -12,8 +12,10 @@ import qualified Data.Text.IO as IO
 import qualified Language.PureScript.CST.Convert as CST
 import qualified Language.PureScript.CST.Errors as CST
 import qualified Language.PureScript.CST.Lexer as CST
+import qualified Language.PureScript.CST.Monad as CST
 import qualified Language.PureScript.CST.Parser as CST
 import qualified Language.PureScript.CST.Print as CST
+import qualified Language.PureScript.CST.Types as CST
 import qualified Language.PureScript.Errors as Errs
 import qualified Language.PureScript.Make as Make
 import qualified Language.PureScript.Names as Names
@@ -66,10 +68,9 @@ main = do
   when ("--tokens" `elem` args) $ do
     for_ filePaths $ \path -> do
       src <- IO.readFile path
-      case CST.lex src of
-        Left errs ->
-          for_ errs $ \err ->
-            putStrLn $ ex <> " " <> path <> " " <> CST.prettyPrintError err
+      case sequence $ CST.lex src of
+        Left (_, err) ->
+          putStrLn $ ex <> " " <> path <> " " <> CST.prettyPrintError err
         Right toks -> do
           putStrLn $ check <> " " <> path
           IO.putStrLn $ CST.printTokens toks
@@ -90,7 +91,7 @@ main = do
     let
       cst = CST.parse src
       res = (\a -> (path, src, a, CST.convertModule path a)) <$> cst
-    pure $ (path, src,) $! res
+    pure $ (path, src,) res
 
   let
     modules = foldl' go id mbModules $ Right []

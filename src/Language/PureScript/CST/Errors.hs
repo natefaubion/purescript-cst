@@ -6,7 +6,6 @@ module Language.PureScript.CST.Errors
 
 import Prelude
 
-import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Char (isSpace)
 import Language.PureScript.CST.Layout
@@ -14,11 +13,8 @@ import Language.PureScript.CST.Print
 import Language.PureScript.CST.Types
 
 data ParserErrorType
-  = ErrExpr
-  | ErrDecl
-  | ErrWildcardInType
+  = ErrWildcardInType
   | ErrHoleInType
-  | ErrExprInLabel
   | ErrExprInBinder
   | ErrExprInDeclOrBinder
   | ErrExprInDecl
@@ -26,6 +22,7 @@ data ParserErrorType
   | ErrRecordUpdateInCtr
   | ErrRecordPunInUpdate
   | ErrRecordCtrInUpdate
+  | ErrTypeInConstraint
   | ErrElseInDecl
   | ErrInstanceNameMismatch
   | ErrUnknownFundep
@@ -33,7 +30,6 @@ data ParserErrorType
   | ErrGuardInLetBinder
   | ErrKeywordVar
   | ErrKeywordSymbol
-  | ErrLetBinding
   | ErrToken
   | ErrLineFeedInString
   | ErrAstralCodePointInChar
@@ -43,8 +39,11 @@ data ParserErrorType
   | ErrExpectedFraction
   | ErrExpectedExponent
   | ErrExpectedHex
-  | ErrReservedSymbol Text
+  | ErrReservedSymbol
   | ErrCharInGap Char
+  | ErrModuleName
+  | ErrQualifiedName
+  | ErrEmptyDo
   | ErrLexeme (Maybe String) [String]
   | ErrEof
   deriving (Show, Eq, Ord)
@@ -70,8 +69,6 @@ prettyPrintErrorMessage (ParserError {..}) = case errType of
     "Unexpected wildcard in type; type wildcards are only allowed in value annotations"
   ErrHoleInType ->
     "Unexpected hole in type; type holes are only allowed in value annotations"
-  ErrExprInLabel ->
-    "Expected labeled expression or pun, saw expression"
   ErrExprInBinder ->
     "Expected pattern, saw expression"
   ErrExprInDeclOrBinder ->
@@ -86,6 +83,8 @@ prettyPrintErrorMessage (ParserError {..}) = case errType of
     "Expected record update, saw pun"
   ErrRecordCtrInUpdate ->
     "Expected '=', saw ':'"
+  ErrTypeInConstraint ->
+    "Expected constraint, saw type"
   ErrElseInDecl ->
     "Expected declaration, saw 'else'"
   ErrInstanceNameMismatch ->
@@ -122,44 +121,22 @@ prettyPrintErrorMessage (ParserError {..}) = case errType of
     "Expected exponent"
   ErrExpectedHex ->
     "Expected hex digit"
-  ErrReservedSymbol sym ->
-    "Unexpected reserved symbol '" <> Text.unpack sym <> "'"
+  ErrReservedSymbol ->
+    "Unexpected reserved symbol"
   ErrCharInGap ch ->
     "Unexpected character '" <> [ch] <> "' in gap"
+  ErrModuleName ->
+    "Invalid module name; underscores and primes are not allowed in module names"
+  ErrQualifiedName ->
+    "Unexpected qualified name"
+  ErrEmptyDo ->
+    "Expected do statement"
   ErrLexeme _ _ ->
-    basicError
-  ErrLetBinding ->
     basicError
   ErrToken
     | SourceToken _ (TokLeftArrow _) : _ <- errToks ->
         "Unexpected \"<-\" in expression, perhaps due to a missing 'do' or 'ado' keyword"
   ErrToken ->
-    basicError
-  ErrExpr
-    | SourceToken _ TokLayoutEnd : _ <- errToks ->
-        case errStack of
-          [] ->
-            "Expected expression, saw end of module"
-          _ ->
-            "Expected expression, saw dedent"
-  ErrExpr
-    | SourceToken _ TokLayoutSep : _ <- errToks ->
-        case errStack of
-          (_, LytDo) : _ ->
-            "Expected expression, saw new do statement"
-          (_, LytAdo) : _ ->
-            "Expected expression, saw new ado statement"
-          (_, LytCaseBinders) : _ ->
-            "Expected expression, saw new case branch"
-          (_, LytLet) : _ ->
-            "Expected expression, saw new declaration"
-          (_, LytWhere) : _ ->
-            "Expected expression, saw new declaration"
-          _ ->
-            basicError
-  ErrExpr ->
-    basicError
-  ErrDecl ->
     basicError
 
   where

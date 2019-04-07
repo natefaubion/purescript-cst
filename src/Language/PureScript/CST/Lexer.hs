@@ -1,7 +1,5 @@
 module Language.PureScript.CST.Lexer
-  ( initialParserState
-  , lex
-  , recover
+  ( lex
   , munch
   ) where
 
@@ -9,7 +7,6 @@ import Prelude hiding (lex, exp, exponent, lines)
 
 import Control.Monad (join)
 import qualified Data.Char as Char
-import qualified Data.DList as DList
 import Data.Foldable (foldl')
 import Data.Functor (($>))
 import qualified Data.Scientific as Sci
@@ -21,104 +18,69 @@ import Language.PureScript.CST.Layout
 import Language.PureScript.CST.Positions
 import Language.PureScript.CST.Types
 
-initialParserState :: Text -> ParserState
-initialParserState src = do
-  let (parserLeading, src') = comments src
-  ParserState
-    { parserBuff = []
-    , parserPos = advanceLeading (SourcePos 1 1) parserLeading
-    , parserLeading = parserLeading
-    , parserSource = src'
-    , parserStack = [(SourcePos 0 0, LytRoot)]
-    , parserErrors = []
-    }
-
-lex :: Text -> Either [ParserError] [SourceToken]
-lex src = runParser (initialParserState src) (go mempty)
+lex :: Text -> [LexResult]
+lex = go1
   where
-  go acc = do
-    tok <- munch
-    case tokValue tok of
-      TokEof -> pure $ DList.toList acc
-      _      -> go (acc `DList.snoc` tok)
+  Parser lexK =
+    tokenAndComments
 
-recover :: ParserErrorType -> ([SourceToken] -> a) -> (SourceToken -> Parser a)
-recover err k tok = do
-  let revert = pushBack tok *> pure [tok]
-  stk  <- getLayoutStack
-  toks <-
-    case tokValue tok of
-      TokRightParen           -> revert
-      TokRightBrace           -> revert
-      TokRightSquare          -> revert
-      TokLayoutSep            -> revert
-      TokLayoutEnd            -> revert
-      TokComma                -> revert
-      TokPipe                 -> pure [tok]
-      TokLowerName [] "in"    -> pure [tok]
-      TokLowerName [] "where" -> pure [tok]
-      _ | null stk            -> revert
-        | otherwise           -> (tok :) <$> munchWhile (const (stk ==))
-  addFailure toks err
-  pure $ k toks
+  go1 src = do
+    let (leading, src') = comments src
+    go2 $ LexState
+      { lexPos = advanceLeading (SourcePos 1 1) leading
+      , lexLeading = leading
+      , lexSource = src'
+      , lexStack = [(SourcePos 0 0, LytRoot)]
+      }
 
-munchWhile :: (SourceToken -> LayoutStack -> Bool) -> Parser [SourceToken]
-munchWhile p = go mempty
-  where
-  go acc = do
-    tok <- munch
-    stk <- getLayoutStack
-    if p tok stk
-      then go (acc `DList.snoc` tok)
-      else do
-        pushBack tok
-        pure $ DList.toList acc
+  go2 state@(LexState {..}) =
+    lexK lexSource onError onSuccess
+    where
+    onError lexSource' err = do
+      let
+        len1 = Text.length lexSource
+        len2 = Text.length lexSource'
+        chunk = Text.take (max 0 (len1 - len2)) lexSource
+        chunkDelta = textDelta chunk
+        pos = applyDelta lexPos chunkDelta
+      pure $ Left
+        ( state { lexSource = lexSource' }
+        , ParserError (SourceRange pos $ applyDelta pos (0, 1)) [] lexStack err
+        )
+
+    onSuccess _ (TokEof, _) =
+      Right <$> unwindLayout lexPos lexLeading lexStack
+    onSuccess lexSource' (tok, (trailing, lexLeading')) = do
+      let
+        endPos = advanceToken lexPos tok
+        lexPos' = advanceLeading (advanceTrailing endPos trailing) lexLeading'
+        tokenAnn = TokenAnn
+          { tokRange = SourceRange lexPos endPos
+          , tokLeadingComments = lexLeading
+          , tokTrailingComments = trailing
+          }
+        (lexStack', toks) =
+          insertLayout (SourceToken tokenAnn tok) lexPos' lexStack
+        state' = LexState
+          { lexPos = lexPos'
+          , lexLeading = lexLeading'
+          , lexSource = lexSource'
+          , lexStack = lexStack'
+          }
+      go3 state' toks
+
+  go3 state [] = go2 state
+  go3 state (t : ts) = Right t : go3 state ts
 
 munch :: Parser SourceToken
 munch = Parser $ \state@(ParserState {..}) kerr ksucc ->
   case parserBuff of
-    tok : parserBuff' -> do
-      let state' = state { parserBuff = parserBuff' }
-      ksucc state' tok
-    _ -> do
-      let
-        onSuccess _ (TokEof, _) = do
-          let
-            toks = unwindLayout parserPos parserStack
-            state' = state
-              { parserBuff = tail toks
-              , parserStack = []
-              }
-          ksucc state' (head toks)
-        onSuccess parserSource' (tok, (trailing, parserLeading')) = do
-          let
-            endPos = advanceToken parserPos tok
-            parserPos' = advanceLeading (advanceTrailing endPos trailing) parserLeading'
-            tokenAnn = TokenAnn
-              { tokRange = SourceRange parserPos endPos
-              , tokLeadingComments = parserLeading
-              , tokTrailingComments = trailing
-              }
-            (parserStack', toks) =
-              insertLayout (SourceToken tokenAnn tok) parserPos' parserStack
-            state' = state
-              { parserSource = parserSource'
-              , parserBuff = tail toks
-              , parserPos = parserPos'
-              , parserLeading = parserLeading'
-              , parserStack = parserStack'
-              }
-          ksucc state' (head toks)
-        onError parserSource' err = do
-          let
-            len1 = Text.length parserSource
-            len2 = Text.length parserSource'
-            chunk = Text.take (max 0 (len1 - len2)) parserSource
-            chunkDelta = textDelta chunk
-            pos = applyDelta parserPos chunkDelta
-          kerr state $ ParserError (SourceRange pos $ applyDelta pos (0, 1)) [] parserStack err
-        Parser k = tokenAndComments
-      k parserSource onError onSuccess
+    Right tok : parserBuff' ->
+      ksucc (state { parserBuff = parserBuff' }) tok
+    Left (_,  err) : _ ->
+      kerr state err
+    [] ->
+      error "Empty input"
 
 type Lexer = ParserM ParserErrorType Text
 
@@ -139,10 +101,6 @@ peek = Parser $ \inp _ ksucc ->
   if Text.null inp
     then ksucc inp Nothing
     else ksucc inp $ Just $ Text.head inp
-
-{-# INLINE throw #-}
-throw :: ParserErrorType -> Lexer a
-throw err = Parser $ \inp kerr _ -> kerr inp err
 
 {-# INLINE restore #-}
 restore :: (ParserErrorType -> Bool) -> Lexer a -> Lexer a
@@ -316,7 +274,7 @@ token = peek >>= maybe (pure TokEof) k0
                 case chs of
                   "→"  -> ksucc inp3 $ TokSymbolArr Unicode
                   "->" -> ksucc inp3 $ TokSymbolArr ASCII
-                  _ | isReservedSymbol chs -> kerr inp $ ErrReservedSymbol chs
+                  _ | isReservedSymbol chs -> kerr inp ErrReservedSymbol
                     | otherwise -> ksucc inp3 $ TokSymbolName [] chs
               _ -> ksucc inp TokLeftParen
 
@@ -330,7 +288,7 @@ token = peek >>= maybe (pure TokEof) k0
       nextWhile isSymbolChar >>= \chs ->
         peek >>= \case
           Just ')'
-            | isReservedSymbol chs -> throw $ ErrReservedSymbol chs
+            | isReservedSymbol chs -> throw ErrReservedSymbol
             | otherwise -> next $> TokSymbolName qual chs
           Just ch2 -> throw $ ErrLexeme (Just [ch2]) []
           Nothing  -> throw ErrEof
@@ -673,9 +631,7 @@ isSymbolChar :: Char -> Bool
 isSymbolChar c = (c `elem` (":!#$%&*+./<=>?@\\^|-~" :: [Char])) || (not (Char.isAscii c) && Char.isSymbol c)
 
 isReservedSymbolError :: ParserErrorType -> Bool
-isReservedSymbolError = \case
-  ErrReservedSymbol _ -> True
-  _ -> False
+isReservedSymbolError = (== ErrReservedSymbol)
 
 isReservedSymbol :: Text -> Bool
 isReservedSymbol = flip elem symbols
