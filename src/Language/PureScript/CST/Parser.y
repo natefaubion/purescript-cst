@@ -457,7 +457,7 @@ guardedExpr(a) :: { GuardedExpr () }
 --
 --     patternGuard
 --       : expr0
---       | expr '<-' expr0
+--       | binder '<-' expr0
 --
 doBlock
   : 'do' '\{'
