@@ -4,8 +4,8 @@ module Language.PureScript.CST.Parser
   , parseKind
   , parseExpr
   , parseModule
-  , parseModuleHeader
   , parse
+  , ModuleResult(..)
   ) where
 
 import Prelude hiding (lex)
@@ -27,7 +27,7 @@ import qualified Language.PureScript.Names as N
 %name parseKind kind
 %name parseType type
 %name parseExpr expr
-%name parseModule module
+%name parseModuleBody moduleBody
 %partial parseModuleHeader moduleHeader
 %partial parseDoStatement doStatement
 %partial parseDoBinder doBinder
@@ -291,6 +291,9 @@ typeAtom :: { Type ()}
   | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
   | '(' typeKindedAtom '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
 
+-- Due to a conflict between row syntax and kinded type syntax, we require
+-- kinded type variables to be wrapped in parens. Thus `(a :: Foo)` is always a
+-- row, and to annotate `a` with kind `Foo`, one must use `((a) :: Foo)`.
 typeKindedAtom :: { Type () }
   : '_' { TypeWildcard () $1 }
   | qualProperName { TypeConstructor () $1 }
@@ -362,9 +365,9 @@ expr4 :: { Expr () }
   | 'let' '\{' manySep(letBinding, '\;') '\}' 'in' expr { ExprLet () (LetIn $1 $3 $5 $6) }
   | 'case' sep(expr, ',') 'of' '\{' manySep(caseBranch, '\;') '\}' { ExprCase () (CaseOf $1 $2 $3 $5) }
   -- These special cases handle some idiosynchratic syntax that the current
-  -- parse allows. Technically the parser allows the rhs of a case branch to
-  -- be at any level, but this is ambiguous. We allow it in the case of a
-  -- singleton case, since this is used in the wild.
+  -- parser allows. Technically the parser allows the rhs of a case branch to be
+  -- at any level, but this is ambiguous. We allow it in the case of a singleton
+  -- case, since this is used in the wild.
   | 'case' sep(expr, ',') 'of' '\{' sep(binder0, ',') '->' '\}' exprWhere
       { ExprCase () (CaseOf $1 $2 $3 (pure ($5, Unconditional $6 $8))) }
   | 'case' sep(expr, ',') 'of' '\{' sep(binder0, ',') '\}' guarded('->')
@@ -458,8 +461,7 @@ guardedExpr(a) :: { GuardedExpr () }
 --
 doBlock
   : 'do' '\{'
-      {%% \lk -> do
-        pushBack lk
+      {%% revert $ do
         res <- parseDoStatement
         when (null res) $ addFailure [$2] ErrEmptyDo
         pure $ DoBlock $1 $ NE.fromList res
@@ -467,14 +469,13 @@ doBlock
 
 adoBlock
   : 'ado' '\{'
-      {%% \lk -> pushBack lk *> fmap ($1,) parseDoStatement }
+      {%% revert $ fmap ($1,) parseDoStatement }
 
 doStatement
   : 'let' '\{' manySep(letBinding, '\;') '\}'
-      {%^ \lk -> pushBack lk *> fmap (DoLet $1 $3 :) parseDoNext }
+      {%^ revert $ fmap (DoLet $1 $3 :) parseDoNext }
   | error
-      {%^ \lk -> do
-        pushBack lk
+      {%^ revert $ do
         stmt <- tryPrefix parseDoBinder parseDoExpr
         let
           ctr = case stmt of
@@ -486,37 +487,35 @@ doStatement
       }
 
 doBinder
-  : binder '<-' {%^ \lk -> pushBack lk *> pure ($1, $2) }
+  : binder '<-' {%^ revert $ pure ($1, $2) }
 
 doExpr
-  : expr {%^ \lk -> pushBack lk *> pure $1 }
+  : expr {%^ revert $ pure $1 }
 
 doNext
-  : '\;' {%^ \lk -> pushBack lk *> parseDoStatement }
-  | '\}' {%^ \lk -> pushBack lk *> pure [] }
+  : '\;' {%^ revert parseDoStatement }
+  | '\}' {%^ revert $ pure [] }
 
 guard :: { (SourceToken, Separated (PatternGuard ())) }
   : '|'
-      {%% \lk -> do
-        pushBack lk
+      {%% revert $ do
         (binder, expr) <- tryPrefix parseGuardBinder parseGuardExpr
         fmap (($1,) . Separated (PatternGuard binder expr)) parseGuardNext
       }
 
 guardBinder :: { (Binder (), SourceToken) }
-  : binder '<-' {%^ \lk -> pushBack lk *> pure ($1, $2) }
+  : binder '<-' {%^ revert $ pure ($1, $2) }
 
 guardExpr :: { Expr() }
-  : expr0 {%^ \lk -> pushBack lk *> pure $1 }
+  : expr0 {%^ revert $ pure $1 }
 
 guardNext :: { [(SourceToken, PatternGuard ())] }
   : ','
-      {%^ \lk -> do
-        pushBack lk
+      {%^ revert $ do
         (binder, expr) <- tryPrefix parseGuardBinder parseGuardExpr
         fmap (($1, PatternGuard binder expr) :) parseGuardNext
       }
-  | {- empty -} {%^ \lk -> pushBack lk *> pure [] }
+  | {- empty -} {%^ revert $ pure [] }
 
 binder :: { Binder () }
   : binder0 { $1 }
@@ -548,13 +547,25 @@ recordBinder :: { RecordLabeled (Binder ()) }
   | label '=' binder {% do addFailure [$2] ErrRecordUpdateInCtr; pure . RecordPun . unexpectedName $ lblTok $1 }
   | label ':' binder { RecordField $1 $2 $3 }
 
-module :: { Module () }
-  : 'module' moduleName exports 'where' '\{' moduleDecls '\}'
-      {%^ \(SourceToken ann _) -> pure $ uncurry (Module () $1 $2 $3 $4) $6 (tokLeadingComments ann) }
-
+-- By splitting up the module header from the body, we can incrementally parse
+-- just the header, and then continue parsing the body while still sharing work.
 moduleHeader :: { Module () }
-  : 'module' moduleName exports 'where' '\{' manySepOrEmpty(importDecl, '\;')
-      { Module () $1 $2 $3 $4 $6 [] [] }
+  : 'module' moduleName exports 'where' '\{' moduleImports
+      { (Module () $1 $2 $3 $4 $6 [] []) }
+
+moduleBody :: { ([Declaration ()], [Comment LineFeed]) }
+  : moduleDecls '\}'
+      {%^ \(SourceToken ann _) -> pure (snd $1, tokLeadingComments ann) }
+
+moduleImports :: { [ImportDecl ()] }
+  : importDecls importDecl '\}'
+      {%^ revert $ pushBack $3 *> pure (reverse ($2 : $1)) }
+  | importDecls
+      {%^ revert $ pure (reverse $1) }
+
+importDecls :: { [ImportDecl ()] }
+  : importDecls importDecl '\;' { $2 : $1 }
+  | {- empty -} { [] }
 
 moduleDecls :: { ([ImportDecl ()], [Declaration ()]) }
   : manySep(moduleDecl, '\;') {% toModuleDecls $ NE.toList $1 }
@@ -609,11 +620,9 @@ decl :: { Declaration () }
   | typeHead '=' type {% do checkNoWildcards $3; pure (DeclType () $1 $2 $3) }
   | newtypeHead '=' properName typeAtom {% do checkNoWildcards $4; pure (DeclNewtype () $1 $2 $3 $4) }
   | classHead {% do checkFundeps $1; pure $ DeclClass () $1 Nothing }
-  | classHead 'where' '\{' manySep(classMember, '\;') '\}'
-      {% do checkFundeps $1; pure $ DeclClass () $1 (Just ($2, $4)) }
+  | classHead 'where' '\{' manySep(classMember, '\;') '\}' {% do checkFundeps $1; pure $ DeclClass () $1 (Just ($2, $4)) }
   | instHead { DeclInstanceChain () (Separated (Instance $1 Nothing) []) }
-  | instHead 'where' '\{' manySep(instBinding, '\;') '\}'
-      { DeclInstanceChain () (Separated (Instance $1 (Just ($2, $4))) []) }
+  | instHead 'where' '\{' manySep(instBinding, '\;') '\}' { DeclInstanceChain () (Separated (Instance $1 (Just ($2, $4))) []) }
   | 'derive' instHead { DeclDerive () $1 Nothing $2 }
   | 'derive' 'newtype' instHead { DeclDerive () $1 (Just $2) $3 }
   | ident '::' type { DeclSignature () (Labeled $1 $2 $3) }
@@ -645,8 +654,7 @@ dataCtor :: { DataCtor () }
 --
 classHead :: { ClassHead () }
   : 'class'
-      {%% \lk -> do
-        pushBack lk
+      {%% revert $ do
         let
           ctr (super, (name, vars, fundeps)) =
             ClassHead $1 super name vars fundeps
@@ -654,10 +662,10 @@ classHead :: { ClassHead () }
       }
 
 classSuper
-  : constraints '<=' {%^ \lk -> do pushBack lk; pure ($1, $2) }
+  : constraints '<=' {%^ revert $ pure ($1, $2) }
 
 classNameAndFundeps :: { (Name (N.ProperName 'N.ClassName), [TypeVarBinding ()], Maybe (SourceToken, Separated ClassFundep)) }
-  : properName manyOrEmpty(typeVarBinding) fundeps {%^ \lk -> do pushBack lk; pure ($1, $2, $3) }
+  : properName manyOrEmpty(typeVarBinding) fundeps {%^ revert $ pure ($1, $2, $3) }
 
 fundeps :: { Maybe (SourceToken, Separated ClassFundep) }
   : {- empty -} { Nothing }
@@ -708,5 +716,23 @@ lexer :: (SourceToken -> Parser a) -> Parser a
 lexer k = munch >>= k
 
 parse :: Text -> Either (NE.NonEmpty ParserError) (Module ())
-parse src = snd $ runParser (ParserState (lex src) []) parseModule
+parse = parseModule >=> modFull
+
+data ModuleResult = ModuleResult
+  { modHeaderOnly :: Module ()
+  , modFull :: Either (NE.NonEmpty ParserError) (Module ())
+  }
+
+parseModule :: Text -> Either (NE.NonEmpty ParserError) ModuleResult
+parseModule src = fmap (\header -> ModuleResult header (parseFull header)) headerRes
+  where
+  (st, headerRes) =
+    runParser (ParserState (lex src) []) parseModuleHeader
+
+  parseFull header = do
+    (decls, trailing) <- snd $ runParser st parseModuleBody
+    pure $ header
+      { modDecls = decls
+      , modTrailingComments = trailing
+      }
 }

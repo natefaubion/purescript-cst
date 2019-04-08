@@ -260,6 +260,9 @@ checkNoWildcards ty = do
       _ -> []
   sequence_ $ everythingOnTypes (<>) k ty
 
+revert :: Parser a -> SourceToken -> Parser a
+revert p lk = pushBack lk *> p
+
 reservedNames :: Set Text
 reservedNames = Set.fromList
   [ "ado"

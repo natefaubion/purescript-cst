@@ -12,10 +12,8 @@ import qualified Data.Text.IO as IO
 import qualified Language.PureScript.CST.Convert as CST
 import qualified Language.PureScript.CST.Errors as CST
 import qualified Language.PureScript.CST.Lexer as CST
-import qualified Language.PureScript.CST.Monad as CST
 import qualified Language.PureScript.CST.Parser as CST
 import qualified Language.PureScript.CST.Print as CST
-import qualified Language.PureScript.CST.Types as CST
 import qualified Language.PureScript.Errors as Errs
 import qualified Language.PureScript.Make as Make
 import qualified Language.PureScript.Names as Names
