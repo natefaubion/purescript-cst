@@ -24,20 +24,22 @@ import Language.PureScript.CST.Utils
 import qualified Language.PureScript.Names as N
 }
 
+%expect 75
+
 %name parseKind kind
 %name parseType type
 %name parseExpr expr
 %name parseModuleBody moduleBody
 %partial parseModuleHeader moduleHeader
 %partial parseDoStatement doStatement
-%partial parseDoBinder doBinder
 %partial parseDoExpr doExpr
 %partial parseDoNext doNext
-%partial parseGuardBinder guardBinder
 %partial parseGuardExpr guardExpr
 %partial parseGuardNext guardNext
+%partial parseGuardStatement guardStatement
 %partial parseClassSuper classSuper
 %partial parseClassNameAndFundeps classNameAndFundeps
+%partial parseBinderAndArrow binderAndArrow
 %tokentype { SourceToken }
 %monad { Parser }
 %error { parseError }
@@ -343,7 +345,7 @@ exprBacktick :: { Expr () }
 
 expr2 :: { Expr () }
   : expr3 { $1 }
-  | '-' expr3 { ExprNegate () $1 $2 }
+  | '-' expr2 { ExprNegate () $1 $2 }
 
 expr3 :: { Expr () }
   : expr4 { $1 }
@@ -439,10 +441,10 @@ guardedExpr(a) :: { GuardedExpr () }
 -- productions to parse it, so we'd have to maintain an ad-hoc handwritten
 -- parser which is very difficult to audit.
 --
--- As an alternative we introduce some backtracking. Using %partial parsers,
--- we can encode the state transitions and use the backtracking `tryPrefix`
--- combinator. Binders are generally very short in comparison to expressions,
--- so the cost is modest.
+-- As an alternative we introduce some backtracking. Using %partial parsers and
+-- monadic reductions, we can invoke productions manually and use the
+-- backtracking `tryPrefix` combinator. Binders are generally very short in
+-- comparison to expressions, so the cost is modest.
 --
 --     doBlock
 --       : 'do' '\{' manySep(doStatement, '\;') '\}'
@@ -459,7 +461,7 @@ guardedExpr(a) :: { GuardedExpr () }
 --       : expr0
 --       | binder '<-' expr0
 --
-doBlock
+doBlock :: { DoBlock () }
   : 'do' '\{'
       {%% revert $ do
         res <- parseDoStatement
@@ -467,16 +469,16 @@ doBlock
         pure $ DoBlock $1 $ NE.fromList res
       }
 
-adoBlock
+adoBlock :: { (SourceToken, [DoStatement ()]) }
   : 'ado' '\{'
       {%% revert $ fmap ($1,) parseDoStatement }
 
-doStatement
+doStatement :: { [DoStatement ()] }
   : 'let' '\{' manySep(letBinding, '\;') '\}'
       {%^ revert $ fmap (DoLet $1 $3 :) parseDoNext }
-  | error
+  | {- empty -}
       {%^ revert $ do
-        stmt <- tryPrefix parseDoBinder parseDoExpr
+        stmt <- tryPrefix parseBinderAndArrow parseDoExpr
         let
           ctr = case stmt of
             (Just (binder, sep), expr) ->
@@ -486,36 +488,32 @@ doStatement
         fmap ctr parseDoNext
       }
 
-doBinder
-  : binder '<-' {%^ revert $ pure ($1, $2) }
-
-doExpr
+doExpr :: { Expr () }
   : expr {%^ revert $ pure $1 }
 
-doNext
+doNext :: { [DoStatement ()] }
   : '\;' {%^ revert parseDoStatement }
   | '\}' {%^ revert $ pure [] }
 
 guard :: { (SourceToken, Separated (PatternGuard ())) }
-  : '|'
-      {%% revert $ do
-        (binder, expr) <- tryPrefix parseGuardBinder parseGuardExpr
-        fmap (($1,) . Separated (PatternGuard binder expr)) parseGuardNext
-      }
+  : '|' {%% revert $ fmap (($1,) . uncurry Separated) parseGuardStatement }
 
-guardBinder :: { (Binder (), SourceToken) }
-  : binder '<-' {%^ revert $ pure ($1, $2) }
+guardStatement :: { (PatternGuard (), [(SourceToken, PatternGuard ())]) }
+  : {- empty -}
+      {%^ revert $ do
+        grd <- fmap (uncurry PatternGuard) $ tryPrefix parseBinderAndArrow parseGuardExpr
+        fmap (grd,) parseGuardNext
+      }
 
 guardExpr :: { Expr() }
   : expr0 {%^ revert $ pure $1 }
 
 guardNext :: { [(SourceToken, PatternGuard ())] }
-  : ','
-      {%^ revert $ do
-        (binder, expr) <- tryPrefix parseGuardBinder parseGuardExpr
-        fmap (($1, PatternGuard binder expr) :) parseGuardNext
-      }
+  : ',' {%^ revert $ fmap (\(g, gs) -> ($1, g) : gs) parseGuardStatement }
   | {- empty -} {%^ revert $ pure [] }
+
+binderAndArrow :: { (Binder (), SourceToken) }
+  : binder '<-' {%^ revert $ pure ($1, $2) }
 
 binder :: { Binder () }
   : binder0 { $1 }
