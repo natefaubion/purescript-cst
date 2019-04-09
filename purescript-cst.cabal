@@ -1,8 +1,10 @@
--- This file has been generated from package.yaml by hpack version 0.28.2.
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.1.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d6f6035c821d78d553c296080f90d143fbbb2d54bfebffadc23722658ae6f720
+-- hash: bdf754516b09900c9f44dfcedc7817a560f351b8cccd14c08440d55e407c45fc
 
 name:           purescript-cst
 version:        0.1.0.0
@@ -14,7 +16,6 @@ copyright:      2019 Nathan Faubion
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
-cabal-version:  >= 1.10
 extra-source-files:
     README.md
 
@@ -47,16 +48,14 @@ library
       Glob
     , array
     , async
-    , base >=4.7 && <5
+    , base
     , containers
     , criterion
     , deepseq
     , dlist
-    , megaparsec ==7.0.4
     , mtl
     , pretty-simple
-    , prettyprinter ==1.2.1
-    , purescript ==0.12.2
+    , purescript
     , scientific
     , text
   default-language: Haskell2010
@@ -73,16 +72,14 @@ executable purescript-cst-exe
       Glob
     , array
     , async
-    , base >=4.7 && <5
+    , base
     , containers
     , criterion
     , deepseq
     , dlist
-    , megaparsec ==7.0.4
     , mtl
     , pretty-simple
-    , prettyprinter ==1.2.1
-    , purescript ==0.12.2
+    , purescript
     , purescript-cst
     , scientific
     , text
@@ -101,18 +98,16 @@ test-suite purescript-cst-test
       Glob
     , array
     , async
-    , base >=4.7 && <5
+    , base
     , bytestring
     , containers
     , criterion
     , deepseq
     , dlist
     , filepath
-    , megaparsec ==7.0.4
     , mtl
     , pretty-simple
-    , prettyprinter ==1.2.1
-    , purescript ==0.12.2
+    , purescript
     , purescript-cst
     , scientific
     , tasty

@@ -438,7 +438,7 @@ convertDeclaration :: String -> Declaration a -> [AST.Declaration]
 convertDeclaration fileName decl = case decl of
   DeclData _ (DataHead _ a vars) bd -> do
     let
-      ctr (DataCtor _ x ys) = (nameValue x, convertType fileName <$> ys)
+      ctr (DataCtor _ x ys) = (nameValue x, zip ctrFields $ convertType fileName <$> ys)
       ctrs = case bd of
         Nothing -> []
         Just (_, cs) -> ctr <$> toList cs
@@ -449,7 +449,7 @@ convertDeclaration fileName decl = case decl of
       (goTypeVar <$> vars)
       (convertType fileName bd)
   DeclNewtype _ (DataHead _ a vars) _ x ys -> do
-    let ctrs = [(nameValue x, [convertType fileName ys])]
+    let ctrs = [(nameValue x, [(head ctrFields, convertType fileName ys)])]
     pure $ AST.DataDeclaration ann Env.Newtype (nameValue a) (goTypeVar <$> vars) ctrs
   DeclClass _ (ClassHead _ sup name vars fdeps) bd -> do
     let
@@ -618,3 +618,6 @@ convertModule fileName module'@(Module _ _ modName exps _ imps decls _) = do
     decls' = convertDeclaration fileName =<< decls
     exps' = map (convertExport fileName) . toList . wrpValue <$> exps
   uncurry AST.Module ann (nameValue modName) (imps' <> decls') exps'
+
+ctrFields :: [N.Ident]
+ctrFields = [N.Ident ("value" <> Text.pack (show (n :: Integer))) | n <- [0..]]

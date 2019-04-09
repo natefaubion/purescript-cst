@@ -1,6 +1,6 @@
-resolver: lts-12.21
+resolver: lts-13.12
 packages:
 - .
 extra-deps:
-- purescript-0.12.2
-- megaparsec-7.0.4
+  - git: https://github.com/purescript/purescript.git
+    commit: b09144bc68637bf6657e4147567a3e9185221594
