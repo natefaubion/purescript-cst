@@ -24,7 +24,7 @@ import Language.PureScript.CST.Utils
 import qualified Language.PureScript.Names as N
 }
 
-%expect 95
+%expect 98
 
 %name parseKind kind
 %name parseType type
@@ -193,11 +193,11 @@ op :: { Name (N.OpName a) }
 
 qualSymbol :: { QualifiedName (N.OpName a) }
   : SYMBOL {% toQualifiedName N.OpName $1 }
+  | QUAL_SYMBOL {% toQualifiedName N.OpName $1 }
   | '(..)' {% toQualifiedName N.OpName $1 }
 
 symbol :: { Name (N.OpName a) }
   : SYMBOL {% toName N.OpName $1 }
-  | QUAL_SYMBOL {% toName N.OpName $1 }
   | '(..)' {% toName N.OpName $1 }
 
 label :: { Label }
