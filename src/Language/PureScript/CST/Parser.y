@@ -24,7 +24,7 @@ import Language.PureScript.CST.Utils
 import qualified Language.PureScript.Names as N
 }
 
-%expect 76
+%expect 95
 
 %name parseKind kind
 %name parseType type
@@ -423,7 +423,9 @@ recordUpdate :: { RecordUpdate () }
 
 letBinding :: { LetBinding () }
   : ident '::' type { LetBindingSignature () (Labeled $1 $2 $3) }
-  | many(binderAtom) guarded('=') {% toLetBinding $1 $2 }
+  | ident guarded('=') { LetBindingName () (ValueBindingFields $1 [] $2) }
+  | ident many(binderAtom) guarded('=') { LetBindingName () (ValueBindingFields $1 (NE.toList $2) $3) }
+  | binder1 '=' exprWhere { LetBindingPattern () $1 $2 $3 }
 
 caseBranch :: { (Separated (Binder ()), Guarded ()) }
   : sep(binder1, ',') guarded('->') { ($1, $2) }

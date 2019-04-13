@@ -176,23 +176,6 @@ toBinderConstructor = \case
   a NE.:| [] -> pure a
   a NE.:| _ -> unexpectedToks binderRange (unexpectedBinder) ErrExprInBinder a
 
-toLetBinding :: Monoid a => NE.NonEmpty (Binder a) -> Guarded a -> Parser (LetBinding a)
-toLetBinding lhs guarded = case lhs of
-  BinderVar ann ident NE.:| binders ->
-    pure $ LetBindingName ann (ValueBindingFields ident binders guarded)
-  BinderConstructor ann name [] NE.:| binders -> do
-    mkLetBindingPattern $ BinderConstructor ann name binders
-  binder NE.:| [] ->
-    mkLetBindingPattern binder
-  binders ->
-    unexpectedToks binderRange unexpectedLetBinding ErrExprInDeclOrBinder (NE.head binders)
-  where
-  mkLetBindingPattern binder = case guarded of
-    Unconditional tok wh ->
-      pure $ LetBindingPattern mempty binder tok wh
-    Guarded gs ->
-      unexpectedToks guardedExprRange unexpectedLetBinding ErrGuardInLetBinder (NE.head gs)
-
 toRecordFields
   :: Monoid a
   => Separated (Either (RecordLabeled (Expr a)) (RecordUpdate a))
