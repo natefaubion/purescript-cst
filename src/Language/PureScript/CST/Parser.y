@@ -24,7 +24,7 @@ import Language.PureScript.CST.Utils
 import qualified Language.PureScript.Names as N
 }
 
-%expect 75
+%expect 76
 
 %name parseKind kind
 %name parseType type
@@ -265,20 +265,24 @@ kind1 :: { Kind () }
 
 type :: { Type () }
   : type1 { $1 }
-  | forall many(typeVarBinding) '.' type { TypeForall () $1 $2 $3 $4 }
+  | type1 '::' kind { TypeKinded () $1 $2 $3 }
 
 type1 :: { Type () }
   : type2 { $1 }
-  | type2 '->' type { TypeArr () $1 $2 $3 }
-  | type2 '=>' type {% do cs <- toConstraint $1; pure $ TypeConstrained () cs $2 $3 }
+  | forall many(typeVarBinding) '.' type1 { TypeForall () $1 $2 $3 $4 }
 
 type2 :: { Type () }
   : type3 { $1 }
-  | type2 qualOp type3 { TypeOp () $1 $2 $3 }
+  | type3 '->' type1 { TypeArr () $1 $2 $3 }
+  | type3 '=>' type1 {% do cs <- toConstraint $1; pure $ TypeConstrained () cs $2 $3 }
 
 type3 :: { Type () }
+  : type4 { $1 }
+  | type3 qualOp type4 { TypeOp () $1 $2 $3 }
+
+type4 :: { Type () }
   : typeAtom { $1 }
-  | type3 typeAtom { TypeApp () $1 $2 }
+  | type4 typeAtom { TypeApp () $1 $2 }
 
 typeAtom :: { Type ()}
   : '_' { TypeWildcard () $1 }
@@ -290,7 +294,7 @@ typeAtom :: { Type ()}
   | '(->)' { TypeArrName () $1 }
   | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
   | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
-  | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
+  | '(' type1 ')' { TypeParens () (Wrapped $1 $2 $3) }
   | '(' typeKindedAtom '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
 
 -- Due to a conflict between row syntax and kinded type syntax, we require
@@ -303,7 +307,7 @@ typeKindedAtom :: { Type () }
   | hole { TypeHole () $1 }
   | '{' row '}' { TypeRecord () (Wrapped $1 $2 $3) }
   | '(' row ')' { TypeRow () (Wrapped $1 $2 $3) }
-  | '(' type ')' { TypeParens () (Wrapped $1 $2 $3) }
+  | '(' type1 ')' { TypeParens () (Wrapped $1 $2 $3) }
   | '(' typeKindedAtom '::' kind ')' { TypeParens () (Wrapped $1 (TypeKinded () $2 $3 $4) $5) }
 
 row :: { Row () }
