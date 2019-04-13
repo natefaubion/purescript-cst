@@ -561,7 +561,7 @@ token = peek >>= maybe (pure TokEof) k0
 
   {-
     fraction
-      : '.' [0-9] digits
+      : '.' [0-9_]+
   -}
   fraction :: Lexer (Maybe (Text, String))
   fraction = Parser $ \inp _ ksucc ->
