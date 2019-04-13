@@ -170,7 +170,13 @@ insertLayout src@(SourceToken tokAnn tok) nextPos stack =
         ((_, LytThen) : stk', acc') ->
           (stk', acc') & insertToken src
         _ ->
-          state & insertDefault & popStack (== LytProperty)
+          -- We don't want to insert a layout separator for top-level `else` in
+          -- instance chains.
+          case state & collapse offsideP of
+            state'@(stk', _) | isTopDecl tokPos stk' ->
+              state' & insertToken src
+            state' ->
+              state' & insertSep & insertToken src & popStack (== LytProperty)
 
     -- `forall` binders need masking because the usage of `.` should not
     -- introduce a LytProperty context.

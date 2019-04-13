@@ -571,9 +571,7 @@ moduleDecls :: { ([ImportDecl ()], [Declaration ()]) }
 
 moduleDecl :: { TmpModuleDecl a }
   : importDecl { TmpImport $1 }
-  | decl { TmpDecl $1 }
-  | 'else' '\;' decl { TmpChain $1 $3 }
-  | 'else' decl { TmpChain $1 $2 }
+  | sep(decl, 'else') { TmpChain $1 }
 
 exports :: { Maybe (DelimitedNonEmpty (Export ())) }
   : {- empty -} { Nothing }
