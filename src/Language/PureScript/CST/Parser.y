@@ -476,7 +476,8 @@ doBlock :: { DoBlock () }
       }
 
 adoBlock :: { (SourceToken, [DoStatement ()]) }
-  : 'ado' '\{'
+  : 'ado' '\{' '\}' { ($1, []) }
+  | 'ado' '\{'
       {%% revert $ fmap ($1,) parseDoStatement }
 
 doStatement :: { [DoStatement ()] }
