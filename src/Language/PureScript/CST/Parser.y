@@ -691,7 +691,7 @@ constraints :: { OneOrDelimited (Constraint ()) }
   | '(' sep(constraint, ',') ')' { Many (Wrapped $1 $2 $3) }
 
 constraint :: { Constraint () }
-  : qualProperName manyOrEmpty(typeAtom) {% for_ $2 checkNoWildcards *> pure (Constraint () $1 $2) }
+  : qualProperName manyOrEmpty(typeAtom) {% for_ $2 checkNoWildcards *> for_ $2 checkNoForalls *> pure (Constraint () $1 $2) }
   | '(' constraint ')' { ConstraintParens () (Wrapped $1 $2 $3) }
 
 instBinding :: { InstanceBinding () }

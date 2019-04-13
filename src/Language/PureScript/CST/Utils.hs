@@ -163,7 +163,9 @@ toConstraint = convertParens
   convert :: a -> [Type a] -> Type a -> Parser (Constraint a)
   convert ann acc = \case
     TypeApp a lhs rhs -> convert (a <> ann) (rhs : acc) lhs
-    TypeConstructor a name -> pure $ Constraint (a <> ann) (coerce name) acc
+    TypeConstructor a name -> do
+      for_ acc checkNoForalls
+      pure $ Constraint (a <> ann) (coerce name) acc
     ty -> do
       let (tok1, tok2) = typeRange ty
       addFailure [tok1, tok2] ErrTypeInConstraint
@@ -256,6 +258,14 @@ checkNoWildcards ty = do
     k = \case
       TypeWildcard _ a -> [addFailure [a] ErrWildcardInType]
       TypeHole _ a -> [addFailure [nameTok a] ErrHoleInType]
+      _ -> []
+  sequence_ $ everythingOnTypes (<>) k ty
+
+checkNoForalls :: Type a -> Parser ()
+checkNoForalls ty = do
+  let
+    k = \case
+      TypeForall _ a _ _ _ -> [addFailure [a] ErrToken]
       _ -> []
   sequence_ $ everythingOnTypes (<>) k ty
 
