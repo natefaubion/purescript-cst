@@ -1,7 +1,9 @@
+{-# LANGUAGE NamedFieldPuns #-}
 module Language.PureScript.CST.Errors
   ( ParserError(..)
   , ParserErrorType(..)
   , prettyPrintError
+  , prettyPrintErrorMessage
   ) where
 
 import Prelude
