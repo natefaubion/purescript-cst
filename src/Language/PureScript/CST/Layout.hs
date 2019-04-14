@@ -4,6 +4,7 @@ import Prelude
 
 import Data.DList (snoc)
 import qualified Data.DList as DList
+import Data.Foldable (find)
 import Data.Function ((&))
 import Language.PureScript.CST.Types
 
@@ -288,8 +289,14 @@ insertLayout src@(SourceToken tokAnn tok) nextPos stack =
   insertDefault state =
     state & collapse offsideP & insertSep & insertToken src
 
-  insertStart lyt state =
-    state & pushStack nextPos lyt & insertToken (lytToken nextPos TokLayoutStart)
+  insertStart lyt state@(stk, _) =
+    -- We only insert a new layout start when it's going to increase indentation.
+    -- This prevents things like the following from parsing:
+    --     instance foo :: Foo where
+    --     foo = 42
+    case find (isIndented . snd) stk of
+      Just (pos, _) | srcColumn nextPos <= srcColumn pos -> state
+      _ -> state & pushStack nextPos lyt & insertToken (lytToken nextPos TokLayoutStart)
 
   insertSep state@(stk, acc) = case stk of
     -- LytTopDecl is closed by a separator.
