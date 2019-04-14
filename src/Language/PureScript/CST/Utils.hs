@@ -109,6 +109,7 @@ toName k tok = case tokValue tok of
   TokUpperName [] a  -> pure $ Name tok (k a)
   TokSymbolName [] a -> pure $ Name tok (k a)
   TokOperator [] a   -> pure $ Name tok (k a)
+  TokHole a          -> pure $ Name tok (k a)
   _                  -> internalError $ "Invalid name: " <> show tok
 
 toLabel :: SourceToken -> Label
