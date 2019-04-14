@@ -578,7 +578,11 @@ moduleDecls :: { ([ImportDecl ()], [Declaration ()]) }
 
 moduleDecl :: { TmpModuleDecl a }
   : importDecl { TmpImport $1 }
-  | sep(decl, 'else') { TmpChain $1 }
+  | sep(decl, declElse) { TmpChain $1 }
+
+declElse :: { SourceToken }
+  : 'else' { $1 }
+  | 'else' '\;' { $1 }
 
 exports :: { Maybe (DelimitedNonEmpty (Export ())) }
   : {- empty -} { Nothing }
